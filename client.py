@@ -408,7 +408,9 @@ class ChatClient:
                 self.callback('USERS', users)
 
         elif cmd == 'logout':
-            self._disconnect_cleanup()
+            self._clear_session_state()
+            if self.callback:
+                self.callback('UPDATE_BUTTONS', None)
 
     # ------------------------------------------------------------------
     # 消息加解密与缓存
@@ -605,6 +607,10 @@ class ChatClient:
         })
 
     def register(self, username, password, store_private_key=True, invite_code=''):
+        # 若当前已登录，先退出会话，避免 token 与新身份密钥混用
+        if self.token:
+            self.logout()
+
         # 生成密钥对
         id_priv, id_pub = IdentityKeyManager.generate()
         x_priv, x_pub = ExchangeKeyManager.generate()
@@ -720,10 +726,12 @@ class ChatClient:
     def logout(self):
         if self.token:
             self._send({'cmd': 'logout', 'token': self.token})
-        self._disconnect_cleanup()
+        self._clear_session_state()
+        if self.callback:
+            self.callback('UPDATE_BUTTONS', None)
 
-    def _disconnect_cleanup(self):
-        self.running = False
+    def _clear_session_state(self):
+        """仅清理登录态，不断开与服务器的连接。"""
         self.token = None
         self.username = None
         self.pending_login_user = None
@@ -732,8 +740,6 @@ class ChatClient:
         self.id_pub = None
         self.x_priv = None
         self.x_pub = None
-        self.server_ed25519_pub = None
-        self.server_x25519_pub = None
         self.user_pubkeys.clear()
         with self.pending_msg_lock:
             self.pending_messages.clear()
@@ -742,6 +748,12 @@ class ChatClient:
         with self.pending_verifications_lock:
             self.pending_verifications.clear()
         self.clear_password()
+
+    def _disconnect_cleanup(self):
+        self.running = False
+        self._clear_session_state()
+        self.server_ed25519_pub = None
+        self.server_x25519_pub = None
         if self.sock:
             try:
                 self.sock.close()
@@ -1079,6 +1091,9 @@ class ChatGUI:
         if not self.client.server_ed25519_pub:
             self._dialog_showerror("错误", "服务器公钥未就绪")
             return
+        if self.client.token:
+            self.client.logout()
+            self.append_chat("系统", "检测到当前账号已登录，已自动登出后继续注册")
         username = self._dialog_input("注册", "用户名 (3-20字母数字):")
         if not username or not re.match(r'^[A-Za-z0-9]{3,20}$', username):
             return
