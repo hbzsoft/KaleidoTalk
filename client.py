@@ -88,6 +88,7 @@ class ChatClient:
         # 服务器公钥
         self.server_ed25519_pub = None
         self.server_x25519_pub = None
+        self.require_invite_for_register = None
 
         # 用户公钥缓存
         self.user_pubkeys = {}  # username -> {'ed25519': ..., 'x25519': ...}
@@ -214,6 +215,8 @@ class ChatClient:
 
             # 请求服务器公钥
             self._send({'cmd': 'get_server_pubkey'})
+            # 查询注册策略（是否需要邀请码）
+            self._send({'cmd': 'get_reg_policy'})
             return True
         except socket.timeout:
             if self.callback:
@@ -318,6 +321,9 @@ class ChatClient:
         elif cmd == 'reg_user':
             if self.callback:
                 self.callback('SUCCESS', '注册成功，请登录')
+
+        elif cmd == 'reg_policy':
+            self.require_invite_for_register = bool(data.get('require_invite', False))
 
         elif cmd == 'login':
             if status == 'challenge':
@@ -784,6 +790,7 @@ class ChatGUI:
         self.message_queue = queue.Queue()
         self.client = ChatClient()
         self.client.callback = self.on_message_received
+        self._pending_register = None
 
         self.is_minimized_to_tray = False
         self.tray_icon = None
@@ -1086,18 +1093,27 @@ class ChatGUI:
         if choice is None:
             return
 
+        # 记录本次注册请求，若服务端返回 invite_required 可自动补填并重试
+        self._pending_register = {
+            'username': username,
+            'password': pw,
+            'store_private_key': choice,
+            'invite_code': '',
+        }
+
         invite = ''
         if self._reg_policy_required():
             invite = self._dialog_input("邀请码", "请输入邀请码:")
             if not invite:
+                self._pending_register = None
                 return
+            self._pending_register['invite_code'] = invite
 
         self.client.register(username, pw, store_private_key=choice, invite_code=invite)
 
     def _reg_policy_required(self):
-        # 简化：注册时服务器会返回错误，但此处可以先查询策略
-        # 这里直接返回 False 以避免额外命令，服务器端会检查
-        return False
+        # 连接后客户端会主动查询 get_reg_policy
+        return bool(self.client.require_invite_for_register)
 
     def login_user(self):
         if not self.client.server_ed25519_pub:
@@ -1166,9 +1182,22 @@ class ChatGUI:
         if msg_type == 'SYS':
             self.append_chat("系统", content)
         elif msg_type == 'ERROR':
+            if content == 'invite_required' and self._pending_register is not None:
+                invite = self._dialog_input("邀请码", "该服务器要求邀请码，请输入邀请码:")
+                if invite:
+                    self._pending_register['invite_code'] = invite
+                    self.client.register(
+                        self._pending_register['username'],
+                        self._pending_register['password'],
+                        store_private_key=self._pending_register['store_private_key'],
+                        invite_code=invite,
+                    )
+                    return
             self.append_chat("错误", content)
         elif msg_type == 'SUCCESS':
             self.append_chat("成功", content)
+            if isinstance(content, str) and ('注册成功' in content):
+                self._pending_register = None
             self.update_button_states()
         elif msg_type == 'MESSAGE':
             if isinstance(content, dict):
