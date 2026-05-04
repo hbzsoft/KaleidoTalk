@@ -1218,6 +1218,7 @@ class ChatGUI:
             "- cryptography (Apache 2.0)\n"
             "- pystray (LGPLv3)\n"
             "- PIL (MIT 衍生)\n"
+            "- CustomTkinker (MIT)\n"
         )
         self._dialog_showinfo("关于 KaleidoTalk", about_text)
 
