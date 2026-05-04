@@ -928,7 +928,7 @@ class ChatGUI:
         default_font = ('Verdana', 10)
         self.root.option_add('*Font', default_font)
         self.root.option_add('*Dialog.msg.Font', default_font)
-        self.root.title("万花筒聊天软件 V2.2")
+        self.root.title("KaleidoTalk V2.2")
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
         width = min(1100, max(900, screen_w - 120))
@@ -1218,6 +1218,7 @@ class ChatGUI:
             "- cryptography (Apache 2.0)\n"
             "- pystray (LGPLv3)\n"
             "- PIL (MIT 衍生)\n"
+            "- CustomTkinker (MIT)\n"
         )
         self._dialog_showinfo("关于 KaleidoTalk", about_text)
 
@@ -1834,7 +1835,7 @@ class ChatGUI:
             pystray.MenuItem('打开', lambda: self.root.after(0, self.restore_from_tray)),
             pystray.MenuItem('退出', lambda: self.root.after(0, self._quit_application))
         )
-        self.tray_icon = pystray.Icon('kaleido', image, '万花筒聊天', menu)
+        self.tray_icon = pystray.Icon('kaleido', image, 'KaleidoTalk', menu)
         threading.Thread(target=self.tray_icon.run, daemon=True).start()
 
     def restore_from_tray(self):

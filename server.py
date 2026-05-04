@@ -773,7 +773,7 @@ def handle_client(sock, addr):
         send_msg(sock, {
             'type': 'welcome',
             'data': {
-                'message': '欢迎使用万花筒聊天软件 V2.2',
+                'message': '欢迎使用KaleidoTalk V2.2',
                 'server_time': datetime.now().isoformat()
             }
         })

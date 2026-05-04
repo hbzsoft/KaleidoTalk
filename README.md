@@ -156,6 +156,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - [cryptography](https://cryptography.io/) - 加密算法实现 (Apache 2.0)
 - [pystray](https://github.com/moses-palmer/pystray) - 系统托盘 (LGPLv3)
 - [Pillow](https://python-pillow.org/) - 图像处理 (MIT 衍生)
+- [CustomTkinter](https://customtkinter.tomschimansky.com/) - GUI 页面 (MIT)
 
 ## 📧 联系方式
 
