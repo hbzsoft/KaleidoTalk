@@ -225,18 +225,30 @@ class ChatClient:
         eph_pub_bytes = base64.b64decode(encrypted_session_key['eph_pub'])
         ct = base64.b64decode(encrypted_session_key['ct'])
         tag = base64.b64decode(encrypted_session_key['tag'])
+        nonce_b64 = encrypted_session_key.get('nonce')
         eph_pub = x25519.X25519PublicKey.from_public_bytes(eph_pub_bytes)
         shared_secret = self.x_priv.exchange(eph_pub)
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
-            length=32 + 12,
+            length=32,
             salt=None,
             info=b'kaleidotalk-session-key',
             backend=default_backend(),
         )
-        key_material = hkdf.derive(shared_secret)
-        aes_key = key_material[:32]
-        nonce = key_material[32:44]
+        aes_key = hkdf.derive(shared_secret)
+        if nonce_b64:
+            nonce = base64.b64decode(nonce_b64)
+        else:
+            # Backward compatibility for old servers that derived nonce from HKDF.
+            hkdf_legacy = HKDF(
+                algorithm=hashes.SHA256(),
+                length=32 + 12,
+                salt=None,
+                info=b'kaleidotalk-session-key',
+                backend=default_backend(),
+            )
+            legacy_km = hkdf_legacy.derive(shared_secret)
+            nonce = legacy_km[32:44]
         cipher = Cipher(algorithms.AES(aes_key), modes.GCM(nonce, tag), backend=default_backend())
         decryptor = cipher.decryptor()
         return decryptor.update(ct) + decryptor.finalize()
