@@ -1,0 +1,28 @@
+KaleidoTalk third-party notices
+
+Copyright (C) 2026 Bangze Han
+
+This project includes third-party components that are licensed separately.
+The complete license texts are stored in the licenses/ directory.
+
+1. cryptography
+   Copyright (c) The Python Cryptographic Authority and individual contributors.
+   License: Apache License 2.0.
+   Licensed under Apache License 2.0. A copy is provided in licenses/Apache-2.0.txt.
+
+2. pystray
+   Copyright (c) pystray contributors.
+   License: GNU Lesser General Public License v3.0.
+   Licensed under LGPL v3.0. A copy is provided in licenses/LGPL-3.0.txt.
+
+3. Pillow
+   Copyright (c) Secret Labs AB, Fredrik Lundh, Jeffrey A. Clark, and contributors.
+   License: HPND (Historical Permission Notice and Disclaimer).
+   Licensed under HPND. A copy is provided in licenses/HPND.txt.
+
+4. CustomTkinter
+   Copyright (c) Tom Schimansky and contributors.
+   License: MIT License.
+   Licensed under the MIT License. A copy is provided in licenses/MIT.txt.
+
+This notice is informational and does not modify the terms of any third-party license.
