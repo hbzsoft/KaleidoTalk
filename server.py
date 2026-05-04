@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Bangze Han
+# -*- coding: utf-8 -*-
 
 # This file is part of KaleidoTalk.
 
@@ -16,13 +17,17 @@ import json
 import os
 import base64
 import hashlib
+import hmac
 import time
 import re
 import secrets
 import logging
 from datetime import datetime
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.asymmetric import ed25519, x25519
+from cryptography.hazmat.backends import default_backend
 from network import send_msg, recv_msg
 from crypto_utils import (
     IdentityKeyManager,
@@ -58,12 +63,14 @@ locks = {
     'keys_file': threading.Lock(),
     'invites_file': threading.Lock(),
     'tokens': threading.Lock(),
+    'sessions': threading.Lock(),
 }
 
 # ----------------------------------------------------------------------
 # 全局状态
-clients = {}                # socket -> {'username': str, 'token': str}
+clients = {}                # socket -> {'username': str, 'session_id': str}
 tokens = {}                 # token -> username
+sessions = {}               # session_id -> {'username': str, 'session_key': bytes, 'timestamps': {int: int}}
 logged_in_users = {}        # username -> socket
 pending_messages = {}       # username -> list of dicts (to be sent on login)
 ip_attempts = {}            # ip -> {'reg': [timestamps], 'login': [timestamps], 'banned_until': float}
@@ -90,6 +97,9 @@ REGISTER_LIMIT = 10
 LOGIN_LIMIT = 20
 TIME_WINDOW = 60
 MAX_MSG_SIZE = 10 * 1024 * 1024
+SESSION_TIME_WINDOW = 300
+SESSION_TIME_WINDOW_MS = SESSION_TIME_WINDOW * 1000
+AUTH_COMMANDS = ('message', 'list_users', 'logout', 'get_pubkey')
 
 # ----------------------------------------------------------------------
 # 文件操作（带锁）
@@ -168,6 +178,107 @@ def save_bans_file(bans):
         with open(temp, 'w', encoding='utf-8') as f:
             json.dump(bans, f, indent=2, ensure_ascii=False)
         os.replace(temp, BANS_FILE)
+
+
+def _canonical_json(data):
+    return json.dumps(data or {}, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+
+def _auth_message(session_id, timestamp, data):
+    return f'{session_id}{timestamp}{_canonical_json(data)}'.encode('utf-8')
+
+
+def _encrypt_session_key_for_client(session_key, client_x25519_pub_pem):
+    client_pub = ExchangeKeyManager.deserialize_public_key(client_x25519_pub_pem)
+    eph_priv = x25519.X25519PrivateKey.generate()
+    eph_pub = eph_priv.public_key()
+    shared_secret = eph_priv.exchange(client_pub)
+    hkdf = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32 + 12,
+        salt=None,
+        info=b'kaleidotalk-session-key',
+        backend=default_backend(),
+    )
+    key_material = hkdf.derive(shared_secret)
+    aes_key = key_material[:32]
+    nonce = key_material[32:44]
+    cipher = Cipher(algorithms.AES(aes_key), modes.GCM(nonce), backend=default_backend())
+    encryptor = cipher.encryptor()
+    ciphertext = encryptor.update(session_key) + encryptor.finalize()
+    return {
+        'eph_pub': base64.b64encode(eph_pub.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )).decode('utf-8'),
+        'ct': base64.b64encode(ciphertext).decode('utf-8'),
+        'tag': base64.b64encode(encryptor.tag).decode('utf-8'),
+    }
+
+
+def _create_session(username, client_x25519_pub_pem):
+    session_id = secrets.token_hex(32)
+    session_key = os.urandom(32)
+    with locks['sessions']:
+        sessions[session_id] = {
+            'username': username,
+            'session_key': session_key,
+            'timestamps': {},
+            'client_x25519_pub': client_x25519_pub_pem,
+        }
+    return session_id, session_key
+
+
+def _remove_session(session_id):
+    with locks['sessions']:
+        sessions.pop(session_id, None)
+
+
+def _verify_authenticated_request(payload):
+    session_id = payload.get('session_id', '')
+    timestamp_raw = payload.get('timestamp')
+    provided_hmac = payload.get('hmac', '')
+    data = payload.get('data', {})
+
+    if not session_id or not isinstance(data, dict):
+        return False, '缺少会话或请求数据', None, None
+
+    try:
+        timestamp = int(timestamp_raw)
+    except Exception:
+        return False, '时间戳无效', None, None
+
+    now_ms = int(time.time() * 1000)
+    if abs(now_ms - timestamp) > SESSION_TIME_WINDOW_MS:
+        return False, '时间戳超出允许范围', None, None
+
+    with locks['sessions']:
+        session = sessions.get(session_id)
+        if not session:
+            return False, '会话已失效', None, None
+        session_key = session['session_key']
+        timestamp_cache = session.setdefault('timestamps', {})
+        stale = [ts for ts, seen_at in timestamp_cache.items() if now_ms - seen_at > SESSION_TIME_WINDOW_MS]
+        for ts in stale:
+            timestamp_cache.pop(ts, None)
+        if timestamp in timestamp_cache:
+            return False, '重放请求', None, None
+
+    expected = hmac.new(session_key, _auth_message(session_id, timestamp, data), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, str(provided_hmac)):
+        return False, 'HMAC 校验失败', None, None
+
+    with locks['sessions']:
+        session = sessions.get(session_id)
+        if not session:
+            return False, '会话已失效', None, None
+        timestamp_cache = session.setdefault('timestamps', {})
+        if timestamp in timestamp_cache:
+            return False, '重放请求', None, None
+        timestamp_cache[timestamp] = now_ms
+        username = session['username']
+
+    return True, username, session_id, data
 
 # ----------------------------------------------------------------------
 # 密码强度检查
@@ -278,15 +389,19 @@ def send_pending_messages(sock, username):
 
 # ----------------------------------------------------------------------
 # 连接与用户管理
-def register_socket(sock, username, token):
+def register_socket(sock, username, session_id):
     with locks['clients']:
-        clients[sock] = {'username': username, 'token': token}
+        clients[sock] = {'username': username, 'session_id': session_id}
     with locks['logged_in']:
         old_sock = logged_in_users.get(username)
         if old_sock and old_sock != sock:
             # 顶替旧连接
             try:
                 send_msg(old_sock, {'type': 'force_logout', 'data': '您的账号已在其他设备登录'})
+                old_info = clients.get(old_sock, {})
+                old_session_id = old_info.get('session_id')
+                if old_session_id:
+                    _remove_session(old_session_id)
                 old_sock.close()
             except Exception:
                 pass
@@ -298,9 +413,9 @@ def unregister_socket(sock):
     if not info:
         return
     username = info['username']
-    token = info['token']
-    with locks['tokens']:
-        tokens.pop(token, None)
+    session_id = info.get('session_id')
+    if session_id:
+        _remove_session(session_id)
     with locks['logged_in']:
         if logged_in_users.get(username) == sock:
             logged_in_users.pop(username, None)
@@ -313,16 +428,17 @@ def unregister_socket(sock):
 def handle_message(sock, addr, payload):
     cmd = payload.get('cmd')
     data = payload.get('data', {})
-    token = payload.get('token', '')
+    username = None
 
-    # 需要登录的命令
-    if cmd in ('message', 'list_users', 'logout', 'get_pubkey'):
-        username = get_user_by_token(token)
-        if not username:
-            send_msg(sock, {'status': 'error', 'error': '未登录或会话过期'})
+    # 需要会话认证的命令
+    if cmd in AUTH_COMMANDS:
+        ok, username, session_id, auth_data = _verify_authenticated_request(payload)
+        if not ok:
+            send_msg(sock, {'status': 'error', 'error': username})
             return
+        data = auth_data
     else:
-        username = None
+        session_id = None
 
     if cmd == 'get_server_pubkey':
         # 返回服务器 Ed25519 和 X25519 公钥
@@ -418,8 +534,8 @@ def handle_message(sock, addr, payload):
         logger.info(f"注册成功: {username} (store_key={store_private_key})")
 
     elif cmd == 'login':
-        # 已有 token 则先注销
-        if token and username:
+        # 如果该 socket 之前已绑定会话，先清理旧会话
+        if clients.get(sock):
             unregister_socket(sock)
         username = data['username']
         if not re.match(r'^[A-Za-z0-9]{3,20}$', username):
@@ -473,13 +589,14 @@ def handle_message(sock, addr, payload):
                 send_msg(sock, {'status': 'error', 'error': '密码错误'})
                 return
             # 登录成功
-            token = bind_token(username)
-            register_socket(sock, username, token)
+            session_id, session_key = _create_session(username, key_data['x25519_pub'])
+            register_socket(sock, username, session_id)
             send_msg(sock, {
                 'status': 'ok',
                 'cmd': 'login',
                 'data': {
-                    'token': token,
+                    'session_id': session_id,
+                    'encrypted_session_key': _encrypt_session_key_for_client(session_key, key_data['x25519_pub']),
                     'encrypted_private': key_data.get('encrypted_private', ''),
                     'ed25519_pub': key_data['ed25519_pub'],
                     'x25519_pub': key_data['x25519_pub'],
@@ -526,13 +643,14 @@ def handle_message(sock, addr, payload):
         except Exception:
             send_msg(sock, {'status': 'error', 'error': '签名验证失败'})
             return
-        token = bind_token(username)
-        register_socket(sock, username, token)
+        session_id, session_key = _create_session(username, user_keys[username]['x25519_pub'])
+        register_socket(sock, username, session_id)
         send_msg(sock, {
             'status': 'ok',
             'cmd': 'login',
             'data': {
-                'token': token,
+                'session_id': session_id,
+                'encrypted_session_key': _encrypt_session_key_for_client(session_key, user_keys[username]['x25519_pub']),
                 'ed25519_pub': pub_pem,
                 'x25519_pub': user_keys[username]['x25519_pub'],
             }

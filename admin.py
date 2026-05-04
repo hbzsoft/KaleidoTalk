@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Bangze Han
+# -*- coding: utf-8 -*-
 
 # This file is part of KaleidoTalk.
 
