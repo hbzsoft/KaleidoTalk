@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>KaleidoTalk · 端到端加密聊天软件</title>
-    <!-- 使用现代、温和的视觉风格，注重可读性与技术感 -->
     <style>
         * {
             margin: 0;
@@ -20,14 +19,12 @@
             scroll-behavior: smooth;
         }
 
-        /* 简约容器 */
         .container {
             max-width: 1200px;
             margin: 0 auto;
             padding: 0 2rem;
         }
 
-        /* 导航栏 (极简) */
         .nav {
             padding: 1.5rem 0;
             border-bottom: 1px solid #e9edf2;
@@ -59,7 +56,6 @@
             color: #1e6f5c;
         }
 
-        /* 英雄区 */
         .hero {
             padding: 4rem 0 3rem;
             text-align: center;
@@ -80,6 +76,13 @@
             color: #2c5a6e;
             margin-top: 1rem;
             font-weight: 450;
+        }
+
+        .hero .subtitle {
+            font-size: 1rem;
+            color: #5b7a9a;
+            margin-top: 0.5rem;
+            font-style: italic;
         }
 
         .badge-group {
@@ -134,7 +137,6 @@
             transform: translateY(-2px);
         }
 
-        /* 主要区块通用样式 */
         section {
             margin: 3.5rem 0;
         }
@@ -173,7 +175,6 @@
             color: #2c475c;
         }
 
-        /* 表格样式用于加密协议 */
         .protocol-table {
             width: 100%;
             border-collapse: collapse;
@@ -195,10 +196,9 @@
             color: #1d3e5e;
         }
 
-        /* 代码块 */
         pre {
             background: #0f1722;
-            color: #facc15;      /* 亮黄色，非常醒目 */
+            color: #facc15;
             padding: 1.2rem;
             border-radius: 16px;
             overflow-x: auto;
@@ -209,8 +209,8 @@
 
         code {
             font-family: 'SF Mono', monospace;
-            background: #1e2a3e;   /* 深色背景，区别于白色页面 */
-            color: #facc15;        /* 同样亮黄色 */
+            background: #1e2a3e;
+            color: #facc15;
             padding: 0.2rem 0.4rem;
             border-radius: 8px;
             font-size: 0.85rem;
@@ -222,6 +222,52 @@
             padding: 1rem 1.5rem;
             border-radius: 20px;
             font-family: monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+        }
+
+        .file-tree strong {
+            font-family: system-ui, sans-serif;
+        }
+
+        .philosophy-box {
+            background: linear-gradient(135deg, #f0f4fa 0%, #e8f0f7 100%);
+            border-radius: 28px;
+            padding: 2rem;
+            margin: 2rem 0;
+            border-left: 6px solid #1e6f5c;
+        }
+
+        .philosophy-box h3 {
+            font-size: 1.6rem;
+            margin-bottom: 1rem;
+            color: #1a3a4e;
+        }
+
+        .philosophy-box p {
+            margin-bottom: 1rem;
+            line-height: 1.6;
+        }
+
+        .metaphor-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1.2rem;
+            margin-top: 1.5rem;
+        }
+
+        .metaphor-item {
+            background: white;
+            border-radius: 20px;
+            padding: 1rem 1.2rem;
+            text-align: center;
+        }
+
+        .metaphor-item strong {
+            font-size: 1.2rem;
+            color: #1e6f5c;
+            display: block;
+            margin-bottom: 0.5rem;
         }
 
         footer {
@@ -231,6 +277,26 @@
             text-align: center;
             color: #5b6e8c;
             font-size: 0.85rem;
+        }
+
+        .download-card {
+            background: linear-gradient(135deg, #1e4663 0%, #0f2e45 100%);
+            color: white;
+            text-align: center;
+            border-radius: 28px;
+            padding: 2rem;
+            margin: 1rem 0;
+        }
+
+        .download-card .btn-white {
+            background: white;
+            color: #1e4663;
+            margin-top: 1rem;
+        }
+
+        .download-card .btn-white:hover {
+            background: #eef3fc;
+            transform: translateY(-2px);
         }
 
         @media (max-width: 700px) {
@@ -249,10 +315,10 @@
 <body>
 
 <div class="container">
-    <!-- 简洁导航 -->
     <div class="nav">
         <div class="logo">KaleidoTalk</div>
         <div class="nav-links">
+            <a href="#philosophy">命名故事</a>
             <a href="#features">特性</a>
             <a href="#crypto">加密协议</a>
             <a href="#setup">安装</a>
@@ -261,37 +327,74 @@
         </div>
     </div>
 
-    <!-- Hero 区域 -->
     <div class="hero">
         <h1>KaleidoTalk</h1>
-        <div class="tagline">🔐 端到端加密聊天 · 隐私由你掌控</div>
+        <div class="tagline">🔐 在变幻中守护私密对话的万花筒</div>
+        <div class="subtitle">每一次对话，都像万花筒里的一次转动——独一无二，稍纵即逝，美丽，且只有你自己能看见。</div>
         <div class="badge-group">
             <span class="badge">Ed25519 + X25519</span>
             <span class="badge">AES-256-GCM</span>
             <span class="badge">离线消息队列</span>
             <span class="badge">GPL v3</span>
-            <span class="badge">图形界面 / CLI</span>
+            <span class="badge">跨平台 GUI</span>
         </div>
         <div class="cta-buttons">
             <a href="https://github.com/hbzsoft/KaleidoTalk" class="btn">GitHub 仓库</a>
-            <a href="#setup" class="btn btn-outline">快速开始</a>
+            <a href="https://kaleidotalk.hanbangze.tech/release.zip" class="btn btn-outline">📦 下载 Release.zip</a>
         </div>
     </div>
 
-    <!-- 特性亮点 -->
-    <section id="features">
-        <div class="section-title">✨ 功能特性</div>
-        <div class="card-grid">
-            <div class="card"><h3>🔒 端到端加密</h3><p>Ed25519身份密钥 + X25519密钥交换，消息仅收发双方可解密。服务器只存储密文，无法读取内容。</p></div>
-            <div class="card"><h3>🗄️ 双模式私钥存储</h3><p>可选择将私钥加密存放于服务器（多设备登录），或完全本地存储，私钥永不离开本机。</p></div>
-            <div class="card"><h3>🛡️ 指纹验证 & 信任管理</h3><p>通过公钥哈希（指纹）验证好友身份，防止中间人攻击。信任数据库本地加密保存。</p></div>
-            <div class="card"><h3>📨 离线消息队列</h3><p>好友离线时自动缓存消息，上线后立即送达，不错过任何重要对话。</p></div>
-            <div class="card"><h3>🚦 DoS & 封禁防护</h3><p>IP注册/登录限流，自动/手动封禁恶意用户，管理员可操作邀请码及黑白名单。</p></div>
-            <div class="card"><h3>🖥️ 跨平台 GUI</h3><p>基于 tkinter 的图形界面，支持系统托盘、消息提醒，开箱即用。</p></div>
+    <!-- 下载提示 -->
+    <div class="download-card">
+        <h3>📥 立即体验 KaleidoTalk</h3>
+        <p>当前稳定版本：<strong>V2.2</strong> | 适用于 Windows / Linux / macOS</p>
+        <a href="https://kaleidotalk.hanbangze.tech/release.zip" class="btn btn-white">⬇️ 下载 release.zip</a>
+        <p style="margin-top: 0.8rem; font-size: 0.8rem; opacity: 0.8;">解压后运行 <code>python server.py</code> 启动服务端，<code>python client.py</code> 启动客户端</p>
+    </div>
+
+    <!-- 命名哲学：KaleidoTalk 的灵魂 -->
+    <section id="philosophy">
+        <div class="philosophy-box">
+            <h3>🎨 为什么叫 KaleidoTalk？</h3>
+            <p><strong>KaleidoTalk = Kaleidoscope（万花筒）+ Talk（对话）</strong> —— 这是一个为隐私而生的名字，每一个字母都藏着我们对端到端加密的理解。</p>
+            <div class="metaphor-list">
+                <div class="metaphor-item">
+                    <strong>🌀 变幻与唯一性</strong>
+                    <p style="font-size:0.85rem; margin-top:0.3rem;">万花筒每转动一次，图案就彻底改变，永不再重复。KaleidoTalk 每条消息使用一次性临时密钥，同一句话发两次，密文也完全不同。</p>
+                </div>
+                <div class="metaphor-item">
+                    <strong>🧩 碎片与整体</strong>
+                    <p style="font-size:0.85rem; margin-top:0.3rem;">Ed25519、X25519、AES-256-GCM、HKDF、PBKDF2——每个零件都很普通，组合在一起却呈现出令人惊叹的安全图景。</p>
+                </div>
+                <div class="metaphor-item">
+                    <strong>📦 筒内与筒外</strong>
+                    <p style="font-size:0.85rem; margin-top:0.3rem;">通信内容只有参与对话的人能看见。对服务器、ISP、任何第三方而言，它只是一个无法窥视的“圆筒”。</p>
+                </div>
+                <div class="metaphor-item">
+                    <strong>✨ 童年的纯粹</strong>
+                    <p style="font-size:0.85rem; margin-top:0.3rem;">万花筒是玩具，是童年对“美”和“惊奇”的体验。我们不是在做一个冷冰冰的安全产品，而是在创造一个令人惊叹的数字世界。</p>
+                </div>
+                <div class="metaphor-item">
+                    <strong>💡 光</strong>
+                    <p style="font-size:0.85rem; margin-top:0.3rem;">万花筒依赖光。“Privacy is a human right”——隐私是人权——就是这束光，照亮了那些碎片，让它们呈现出意义。</p>
+                </div>
+            </div>
+            <p style="margin-top: 1rem; text-align: center; font-weight: 500;">—— 你的每一次对话，都只属于你自己。 ——</p>
         </div>
     </section>
 
-    <!-- 加密协议表格 -->
+    <section id="features">
+        <div class="section-title">✨ 功能特性</div>
+        <div class="card-grid">
+            <div class="card"><h3>🔒 端到端加密</h3><p>Ed25519身份密钥 + X25519密钥交换，消息仅收发双方可解密。服务器只存储密文，无法读取任何通信内容。</p></div>
+            <div class="card"><h3>🗄️ 双模式私钥存储</h3><p>可选择将私钥加密存放于服务器（多设备登录），或仅本地存储，私钥永不离开本机。</p></div>
+            <div class="card"><h3>🛡️ 指纹验证 & 信任管理</h3><p>通过公钥哈希（指纹）验证好友身份，支持单词式指纹（6个英文单词），便于跨渠道核对，防止中间人攻击。</p></div>
+            <div class="card"><h3>📨 离线消息队列</h3><p>好友离线时自动缓存消息，上线后立即送达，不错过任何重要对话。</p></div>
+            <div class="card"><h3>🚦 邀请码 & 封禁防护</h3><p>支持邀请码注册机制，IP/用户封禁，注册/登录限流，管理员可远程管理黑白名单。</p></div>
+            <div class="card"><h3>🖥️ 跨平台 GUI</h3><p>基于 CustomTkinter 的现代图形界面，支持系统托盘、消息闪烁提醒，开箱即用。</p></div>
+        </div>
+    </section>
+
     <section id="crypto">
         <div class="section-title">🔐 加密协议细节</div>
         <table class="protocol-table">
@@ -303,24 +406,24 @@
                 <tr><td>密钥交换</td><td>X25519 (ECDH)</td><td>协商临时共享密钥</td></tr>
                 <tr><td>对称加密 + 认证</td><td>AES-256-GCM</td><td>消息加密和完整性校验</td></tr>
                 <tr><td>密钥派生</td><td>HKDF-SHA256</td><td>从 ECDH 共享密钥派生 AES key 与 nonce</td></tr>
-                <tr><td>密码存储</td><td>PBKDF2-SHA256 (600k 迭代)</td><td>服务端存储密码哈希，有效抵抗暴力攻击</td></tr>
+                <tr><td>密码存储</td><td>PBKDF2-SHA256 (600k 迭代)</td><td>服务端存储密码哈希，抵抗暴力攻击</td></tr>
             </tbody>
         </table>
         <div style="margin-top: 1.2rem; background: #eef3fa; border-radius: 18px; padding: 1rem 1.4rem;">
             <p>📬 <strong>消息加密流程:</strong> 临时X25519密钥对 → ECDH交换 → HKDF派生密钥 → AES-256-GCM加密 → Ed25519签名 → 接收方验证签名并解密。</p>
+            <p style="margin-top: 0.5rem; font-size:0.85rem;">💡 这正是 KaleidoTalk 名字的“变幻”含义：每条消息的临时密钥都是全新的，加密图案永不重复。</p>
         </div>
     </section>
 
-    <!-- 安装与运行指南 -->
     <section id="setup">
         <div class="section-title">📦 安装与运行</div>
         <div class="card" style="background: #fefefe;">
             <h3>环境依赖</h3>
             <ul style="margin-left: 1.8rem; margin-top: 0.5rem;">
                 <li>Python 3.8+</li>
-                <li><code>cryptography</code> , <code>pystray</code> , <code>Pillow</code></li>
+                <li>依赖库：<code>cryptography</code> , <code>pystray</code> , <code>Pillow</code> , <code>customtkinter</code></li>
             </ul>
-            <pre><code>pip install cryptography pystray Pillow</code></pre>
+            <pre><code>pip install cryptography pystray Pillow customtkinter</code></pre>
 
             <h3 style="margin-top: 1.5rem;">🚀 启动服务器</h3>
             <pre><code>python server.py</code></pre>
@@ -347,28 +450,32 @@ python admin.py list-bans
         <div class="file-tree" style="margin-top: 2rem;">
             <strong>📁 项目文件结构</strong><br/>
             KaleidoTalk/<br/>
-            ├── client.py          # 客户端GUI<br/>
-            ├── server.py          # 服务端主程序<br/>
-            ├── crypto_utils.py    # 加密核心模块<br/>
-            ├── network.py         # 通信协议<br/>
-            ├── admin.py           # 管理员脚本<br/>
-            ├── COPYING            # GPLv3 全文<br/>
-            └── README.md<br/>
-            <span style="color:#5e7a93;">运行时生成: users.json, user_keys.json, bans.json, local_keys/, server_keys/</span>
+            ├── <strong>client.py</strong>          # 客户端 GUI (CustomTkinter)<br/>
+            ├── <strong>server.py</strong>          # 服务端主程序<br/>
+            ├── <strong>crypto_utils.py</strong>    # 加密核心模块（含 BIP39 指纹单词）<br/>
+            ├── <strong>network.py</strong>         # 通信协议<br/>
+            ├── <strong>admin.py</strong>           # 管理员脚本<br/>
+            ├── <strong>COPYING</strong>            # GPLv3 全文<br/>
+            ├── <strong>README.md</strong>          # 项目说明文档<br/>
+            ├── <strong>NOTICE</strong>             # 第三方版权声明<br/>
+            ├── <strong>licenses/</strong>          # 第三方许可证文件目录<br/>
+            │   ├── Apache-2.0.txt<br/>
+            │   ├── LGPL-3.0.txt<br/>
+            │   ├── HPND.txt<br/>
+            │   └── MIT.txt<br/>
+            <span style="color:#5e7a93;">运行时生成: users.json, user_keys.json, bans.json, invites.json, local_keys/, server_keys/</span>
         </div>
     </section>
 
-    <!-- 从源码构建 & 信任验证简述 -->
     <section>
         <div class="section-title">🔏 安全信任模型</div>
         <div class="card-grid">
-            <div class="card"><h3>🆔 服务器指纹</h3><p>客户端首次连接时核对服务器Ed25519指纹，并存入本地信任库。若指纹变更会发出MITM警告。</p></div>
-            <div class="card"><h3>👥 用户指纹验证</h3><p>双方通信之前可通过安全渠道（当面/电话）比对指纹，一旦信任，后续消息自动解密显示。</p></div>
+            <div class="card"><h3>🆔 服务器指纹</h3><p>客户端首次连接时核对服务器Ed25519指纹，支持单词式显示（6个英文单词），存入本地加密信任库。指纹变更会发出MITM警告。</p></div>
+            <div class="card"><h3>👥 用户指纹验证</h3><p>双方通信前可通过安全渠道（当面/电话）比对指纹单词（如 "apple zebra ..."），验证通过后自动信任，后续消息解密显示。</p></div>
             <div class="card"><h3>🔐 本地信任库防篡改</h3><p>信任记录使用HMAC-SHA256完整性保护，防止恶意篡改。</p></div>
         </div>
     </section>
 
-    <!-- 许可证与法律声明 -->
     <section id="license">
         <div class="section-title">📄 许可证</div>
         <div class="card" style="background: #fafcff;">
@@ -387,11 +494,11 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program. If not, see &lt;https://www.gnu.org/licenses/&gt;.</pre>
-            <p style="margin-top: 1rem;">🎓 第三方库致谢：<code>cryptography</code> (Apache 2.0) ， <code>pystray</code> (LGPLv3) ， <code>Pillow</code> (MIT 兼容)</p>
+            <p style="margin-top: 1rem;">🎓 <strong>第三方库致谢</strong> (详见 <code>NOTICE</code> 及 <code>licenses/</code> 目录)：<br/>
+            <code>cryptography</code> (Apache 2.0) ， <code>pystray</code> (LGPLv3) ， <code>Pillow</code> (HPND) ， <code>customtkinter</code> (MIT)</p>
         </div>
     </section>
 
-    <!-- 额外引用 更新日志/状态 -->
     <section>
         <div class="section-title">🌟 参与贡献</div>
         <div class="card" style="text-align: center;">
@@ -406,7 +513,7 @@ along with this program. If not, see &lt;https://www.gnu.org/licenses/&gt;.</pre
 
     <footer>
         © 2026 Bangze Han · KaleidoTalk 遵循 GPL-3.0 协议 · 为隐私而设计的聊天软件<br/>
-        <span style="font-size:0.75rem;">由 ❤️ 与 Python 驱动 · 本站托管于 GitHub Pages</span>
+        <span style="font-size:0.75rem;">“Privacy is a human right.” —— 每一次对话，都像万花筒里的一次转动，只属于你自己。</span>
     </footer>
 </div>
 </body>
