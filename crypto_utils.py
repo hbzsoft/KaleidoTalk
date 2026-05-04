@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Bangze Han
+# -*- coding: gbk -*-
 
 # This file is part of KaleidoTalk.
 
@@ -14,6 +15,7 @@ import os
 import base64
 import hashlib
 import hmac as hmac_mod
+import gzip
 import json
 from datetime import datetime
 from cryptography.hazmat.primitives import hashes, serialization
@@ -24,8 +26,114 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 from cryptography.exceptions import InvalidSignature
 
+EMBEDDED_BIP39_WORDLIST_B64_GZ = """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
+28E8MwAA"""
+
 class IdentityKeyManager:
-    """Ed25519 Ë∫´‰ªΩÂØÜÈí•ÁÆ°ÁêÜ"""
+    """Ed25519 …Ì∑›√‹‘øπ‹¿Ì"""
     @staticmethod
     def generate():
         private_key = ed25519.Ed25519PrivateKey.generate()
@@ -79,7 +187,7 @@ class IdentityKeyManager:
             return False
 
 class ExchangeKeyManager:
-    """X25519 ÂØÜÈí•‰∫§Êç¢ÂØÜÈí•ÁÆ°ÁêÜ"""
+    """X25519 √‹‘øΩªªª√‹‘øπ‹¿Ì"""
     @staticmethod
     def generate():
         private_key = x25519.X25519PrivateKey.generate()
@@ -114,7 +222,7 @@ class ExchangeKeyManager:
         return private_key.exchange(peer_public_key)
 
 class PasswordManager:
-    """ÂØÜÁ†ÅÂìàÂ∏å‰∏éÈ™åËØÅ"""
+    """√‹¬Îπ˛œ£”Î—È÷§"""
     SALT_LENGTH = 16
     KEY_LENGTH = 32
     ITERATIONS = 600_000
@@ -138,7 +246,7 @@ class PasswordManager:
     def hash_password(password):
         salt = PasswordManager.generate_salt()
         derived = PasswordManager.derive_key(password, salt)
-        # Â≠òÂÇ®Ê†ºÂºèÔºöPBKDF2$<hex(salt)>$<hex(derived)>
+        # ¥Ê¥¢∏Ò Ω£∫PBKDF2$<hex(salt)>$<hex(derived)>
         return f"PBKDF2${salt.hex()}${derived.hex()}"
 
     @staticmethod
@@ -155,13 +263,13 @@ class PasswordManager:
             return False
 
 class MessageEncryptorV2:
-    """Â∏¶Á≠æÂêçÁöÑ X25519 ECDH + AES-256-GCM Âä†ÂØÜ"""
+    """¥¯«©√˚µƒ X25519 ECDH + AES-256-GCM º”√‹"""
     @staticmethod
     def encrypt(plaintext: str, recipient_x25519_pub, sender_identity_priv):
         """
-        ËøîÂõû JSON Â≠óÁ¨¶‰∏≤ (base64 encoded fields)
+        ∑µªÿ JSON ◊÷∑˚¥Æ (base64 encoded fields)
         """
-        # ÁîüÊàê‰∏¥Êó∂ X25519 ÂØÜÈí•ÂØπ
+        # …˙≥…¡Ÿ ± X25519 √‹‘ø∂‘
         eph_priv = x25519.X25519PrivateKey.generate()
         eph_pub = eph_priv.public_key()
         # ECDH
@@ -177,15 +285,15 @@ class MessageEncryptorV2:
         key_material = hkdf.derive(shared_secret)
         aes_key = key_material[:32]
         nonce = key_material[32:44]
-        # GCM Âä†ÂØÜ
+        # GCM º”√‹
         cipher = Cipher(algorithms.AES(aes_key), modes.GCM(nonce), backend=default_backend())
         encryptor = cipher.encryptor()
         ciphertext = encryptor.update(plaintext.encode('utf-8')) + encryptor.finalize()
         tag = encryptor.tag
-        # Á≠æÂêç (eph_pub || ciphertext || tag)
+        # «©√˚ (eph_pub || ciphertext || tag)
         signed_data = eph_pub.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw) + ciphertext + tag
         signature = sender_identity_priv.sign(signed_data)
-        # ÁªÑË£Ö
+        # ◊È◊∞
         packet = {
             'eph_pub': base64.b64encode(eph_pub.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)).decode(),
             'ct': base64.b64encode(ciphertext).decode(),
@@ -197,7 +305,7 @@ class MessageEncryptorV2:
     @staticmethod
     def decrypt(encrypted_json_str, recipient_x25519_priv, sender_identity_pub):
         """
-        ËøîÂõû (plaintext_or_None, error_string)
+        ∑µªÿ (plaintext_or_None, error_string)
         """
         try:
             p = json.loads(encrypted_json_str)
@@ -206,9 +314,9 @@ class MessageEncryptorV2:
             ct = base64.b64decode(p['ct'])
             tag = base64.b64decode(p['tag'])
             sig = base64.b64decode(p['sig'])
-            # È™åËØÅÁ≠æÂêç
+            # —È÷§«©√˚
             signed_data = eph_pub_bytes + ct + tag
-            sender_identity_pub.verify(sig, signed_data)  # Ëã•Êó†Êïà‰ºöÊäõÂá∫ÂºÇÂ∏∏
+            sender_identity_pub.verify(sig, signed_data)  # »ÙŒﬁ–ßª·≈◊≥ˆ“Ï≥£
             # ECDH
             shared_secret = recipient_x25519_priv.exchange(eph_pub)
             hkdf = HKDF(
@@ -226,12 +334,12 @@ class MessageEncryptorV2:
             plain = decryptor.update(ct) + decryptor.finalize()
             return plain.decode('utf-8'), None
         except InvalidSignature:
-            return None, "Á≠æÂêçÈ™åËØÅÂ§±Ë¥•"
+            return None, "«©√˚—È÷§ ß∞‹"
         except Exception as e:
-            return None, f"Ëß£ÂØÜÂ§±Ë¥•: {str(e)}"
+            return None, f"Ω‚√‹ ß∞‹: {str(e)}"
 
 class ServerCrypto:
-    """ÊúçÂä°Âô®ÂØÜÈí•ÁÆ°ÁêÜ‰∏éÂÆ¢Êà∑Á´Ø-ÊúçÂä°Âô®ÂØÜÁ†Å‰º†ËæìÂä†ÂØÜ"""
+    """∑˛ŒÒ∆˜√‹‘øπ‹¿Ì”ÎøÕªß∂À-∑˛ŒÒ∆˜√‹¬Î¥´ ‰º”√‹"""
     _ed25519_priv = None
     _ed25519_pub = None
     _x25519_priv = None
@@ -241,11 +349,11 @@ class ServerCrypto:
 
     @classmethod
     def initialize(cls, admin_password):
-        """Âä†ËΩΩÊàñÁîüÊàêÊúçÂä°Âô®ÂØÜÈí•„ÄÇËã•ÂØÜÁ†ÅÈîôËØØÂ∞ÜÊäõÂºÇÂ∏∏„ÄÇ"""
+        """º”‘ÿªÚ…˙≥…∑˛ŒÒ∆˜√‹‘ø°£»Ù√‹¬Î¥ÌŒÛΩ´≈◊“Ï≥£°£"""
         if not os.path.exists(cls._key_dir):
             os.makedirs(cls._key_dir)
         if os.path.exists(cls._encrypted_file):
-            # Ëß£ÂØÜ
+            # Ω‚√‹
             with open(cls._encrypted_file, 'rb') as f:
                 data = f.read()
             salt = data[:16]
@@ -257,14 +365,14 @@ class ServerCrypto:
             try:
                 plain = decryptor.update(ciphertext[:-16]) + decryptor.finalize()
             except Exception:
-                raise ValueError("ÁÆ°ÁêÜÂØÜÁ†ÅÈîôËØØÊàñÂØÜÈí•Êñá‰ª∂ÊçüÂùè")
+                raise ValueError("π‹¿Ì√‹¬Î¥ÌŒÛªÚ√‹‘øŒƒº˛Àªµ")
             keys = json.loads(plain.decode('utf-8'))
             cls._ed25519_priv = IdentityKeyManager.deserialize_private_key(keys['ed25519_priv'])
             cls._ed25519_pub = cls._ed25519_priv.public_key()
             cls._x25519_priv = ExchangeKeyManager.deserialize_private_key(keys['x25519_priv'])
             cls._x25519_pub = cls._x25519_priv.public_key()
         else:
-            # ÁîüÊàêÊñ∞ÂØÜÈí•Âπ∂Âä†ÂØÜ‰øùÂ≠ò
+            # …˙≥…–¬√‹‘ø≤¢º”√‹±£¥Ê
             cls._ed25519_priv, cls._ed25519_pub = IdentityKeyManager.generate()
             cls._x25519_priv, cls._x25519_pub = ExchangeKeyManager.generate()
             keys = {
@@ -281,7 +389,7 @@ class ServerCrypto:
             tag = encryptor.tag
             with open(cls._encrypted_file, 'wb') as f:
                 f.write(salt + nonce + ct + tag)
-            print("[ServerCrypto] Â∑≤ÁîüÊàêÊñ∞ÊúçÂä°Âô®ÂØÜÈí•Âπ∂Âä†ÂØÜ‰øùÂ≠ò„ÄÇ")
+            print("[ServerCrypto] “—…˙≥…–¬∑˛ŒÒ∆˜√‹‘ø≤¢º”√‹±£¥Ê°£")
 
     @classmethod
     def get_ed25519_pub_pem(cls):
@@ -293,7 +401,7 @@ class ServerCrypto:
 
     @classmethod
     def encrypt_for_server(cls, data: bytes) -> dict:
-        """ÂÆ¢Êà∑Á´ØË∞ÉÁî®Ôºö‰ΩøÁî®ÊúçÂä°Âô® X25519 ÂÖ¨Èí•Âä†ÂØÜÊï∞ÊçÆÔºåËøîÂõû JSON ÂèØÂ∫èÂàóÂåñÁöÑÂ≠óÂÖ∏"""
+        """øÕªß∂Àµ˜”√£∫ π”√∑˛ŒÒ∆˜ X25519 π´‘øº”√‹ ˝æ›£¨∑µªÿ JSON ø…–Ú¡–ªØµƒ◊÷µ‰"""
         eph_priv = x25519.X25519PrivateKey.generate()
         eph_pub = eph_priv.public_key()
         shared = eph_priv.exchange(cls._x25519_pub)
@@ -319,7 +427,7 @@ class ServerCrypto:
 
     @classmethod
     def decrypt_from_client(cls, encrypted_dict: dict) -> bytes:
-        """ÊúçÂä°Âô®Ë∞ÉÁî®ÔºöËß£ÂØÜÂØÜÊñáÔºåËøîÂõûÊòéÊñá bytes"""
+        """∑˛ŒÒ∆˜µ˜”√£∫Ω‚√‹√‹Œƒ£¨∑µªÿ√˜Œƒ bytes"""
         eph_pub_bytes = base64.b64decode(encrypted_dict['eph_pub'])
         eph_pub = x25519.X25519PublicKey.from_public_bytes(eph_pub_bytes)
         ct = base64.b64decode(encrypted_dict['ct'])
@@ -339,3 +447,125 @@ class ServerCrypto:
         decryptor = cipher.decryptor()
         plain = decryptor.update(ct) + decryptor.finalize()
         return plain
+
+
+class FingerprintWords:
+    """
+    SHA-256 ÷∏Œ∆◊™ªªŒ™“◊∂¡µƒ”¢Œƒµ•¥ ¡–±Ì£®¿‡À∆ Signal ∞≤»´¬Î£©
+     π”√ BIP39 ±Í◊º”¢Œƒ¥ ±Ì£®2048 ∏ˆµ•¥ £©
+    """
+    
+    # ¥” english.txt º”‘ÿ BIP39 ¥ ±Ì
+    _wordlist = None
+    
+    @classmethod
+    def _load_wordlist(cls):
+        """º”‘ÿƒ⁄«∂¥ ±Ì£¨Œƒº˛∞ÊΩˆ◊˜Œ™ºÊ»›ªÿÕÀ"""
+        if cls._wordlist is None:
+            try:
+                decoded = gzip.decompress(base64.b64decode(EMBEDDED_BIP39_WORDLIST_B64_GZ))
+                cls._wordlist = [word.strip() for word in decoded.decode('utf-8').splitlines() if word.strip()]
+                if len(cls._wordlist) != 2048:
+                    raise ValueError(f"ƒ⁄«∂¥ ±Ì”¶∞¸∫¨ 2048 ∏ˆµ•¥ £¨µ´ªÒµ√ {len(cls._wordlist)} ∏ˆ")
+            except Exception as e:
+                try:
+                    wordlist_path = os.path.join(os.path.dirname(__file__), 'english.txt')
+                    with open(wordlist_path, 'r', encoding='utf-8') as f:
+                        cls._wordlist = [word.strip() for word in f.readlines() if word.strip()]
+                    if len(cls._wordlist) != 2048:
+                        raise ValueError(f"¥ ±Ì”¶∞¸∫¨ 2048 ∏ˆµ•¥ £¨µ´ªÒµ√ {len(cls._wordlist)} ∏ˆ")
+                except Exception as fallback_error:
+                    raise RuntimeError(f"Œﬁ∑®º”‘ÿ BIP39 ¥ ±Ì: {e}; fallback: {fallback_error}")
+        return cls._wordlist
+    
+    @staticmethod
+    def fingerprint_to_words(fingerprint_hex: str, word_count: int = 6) -> list:
+        """
+        Ω´ SHA-256  Æ¡˘Ω¯÷∆÷∏Œ∆◊™ªªŒ™µ•¥ ¡–±Ì
+        
+        Args:
+            fingerprint_hex: 64 Œª Æ¡˘Ω¯÷∆◊÷∑˚¥Æ£®32 ◊÷Ω⁄ SHA-256 π˛œ££©
+            word_count: “™…˙≥…µƒµ•¥  ˝£®ƒ¨»œ 6£¨∂‘”¶ 66 bit£©
+        
+        Returns:
+            ”¢Œƒµ•¥ ¡–±Ì
+        
+        Raises:
+            ValueError:  ‰»ÎŒﬁ–ß
+        """
+        if not isinstance(fingerprint_hex, str) or len(fingerprint_hex) != 64:
+            raise ValueError(f"÷∏Œ∆±ÿ–Î « 64 Œª Æ¡˘Ω¯÷∆◊÷∑˚¥Æ£¨ªÒµ√: {fingerprint_hex}")
+        
+        if word_count < 1 or word_count > 24:
+            raise ValueError(f"µ•¥  ˝±ÿ–Î‘⁄ 1-24 ÷Æº‰£¨ªÒµ√: {word_count}")
+        
+        try:
+            fingerprint_bytes = bytes.fromhex(fingerprint_hex)
+        except ValueError as e:
+            raise ValueError(f"Œﬁ–ßµƒ Æ¡˘Ω¯÷∆÷∏Œ∆: {e}")
+        
+        wordlist = FingerprintWords._load_wordlist()
+        
+        # º∆À„–Ë“™µƒ±»Ãÿ ˝£∫word_count * 11
+        total_bits = word_count * 11
+        
+        # Ω´◊÷Ω⁄◊™ªªŒ™±»Ãÿ◊÷∑˚¥Æ
+        bit_string = ''.join(format(byte, '08b') for byte in fingerprint_bytes)
+        
+        # »°«∞ total_bits ±»Ãÿ
+        bit_string = bit_string[:total_bits]
+        
+        # √ø 11 ±»Ãÿ”≥…‰Œ™“ª∏ˆµ•¥ À˜“˝
+        words = []
+        for i in range(word_count):
+            start = i * 11
+            end = start + 11
+            index_bits = bit_string[start:end]
+            index = int(index_bits, 2)
+            if index >= len(wordlist):
+                raise RuntimeError(f"À˜“˝‘ΩΩÁ: {index} >= {len(wordlist)}")
+            words.append(wordlist[index])
+        
+        return words
+    
+    @staticmethod
+    def words_to_fingerprint(words: list) -> str:
+        """
+        Ω´µ•¥ ¡–±Ì◊™ªªªÿ Æ¡˘Ω¯÷∆÷∏Œ∆£®”√”⁄—È÷§£©
+        
+        Args:
+            words: ”¢Œƒµ•¥ ¡–±Ì
+        
+        Returns:
+             Æ¡˘Ω¯÷∆÷∏Œ∆◊÷∑˚¥Æ
+        
+        Raises:
+            ValueError: µ•¥ Œﬁ–ßªÚ◊™ªª ß∞‹
+        """
+        if not isinstance(words, list) or len(words) == 0:
+            raise ValueError("µ•¥ ¡–±Ì≤ªƒ‹Œ™ø’")
+        
+        wordlist = FingerprintWords._load_wordlist()
+        word_count = len(words)
+        
+        # Ω®¡¢µ•¥ µΩÀ˜“˝µƒ”≥…‰
+        word_to_index = {word: idx for idx, word in enumerate(wordlist)}
+        
+        # Ω´√ø∏ˆµ•¥ ◊™ªªŒ™ 11 ±»ÃÿµƒÀ˜“˝
+        bit_string = ''
+        for word in words:
+            if word not in word_to_index:
+                raise ValueError(f"Œﬁ–ßµƒµ•¥ : {word}")
+            index = word_to_index[word]
+            bit_string += format(index, '011b')
+        
+        # º∆À„”¶”–µƒ◊÷Ω⁄ ˝£®œÚ…œ»°’˚£©
+        byte_count = (len(bit_string) + 7) // 8
+        
+        # Ω´±»Ãÿ◊÷∑˚¥ÆÃÓ≥‰µΩ◊÷Ω⁄±ﬂΩÁ
+        bit_string = bit_string.ljust(byte_count * 8, '0')
+        
+        # Ω´±»Ãÿ◊™ªªªÿ◊÷Ω⁄
+        fingerprint_bytes = bytes(int(bit_string[i:i+8], 2) for i in range(0, len(bit_string), 8))
+        
+        return fingerprint_bytes.hex()

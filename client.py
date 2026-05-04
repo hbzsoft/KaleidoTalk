@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Bangze Han
+# -*- coding: utf-8 -*-
 
 
 # This file is part of KaleidoTalk.
@@ -12,7 +13,6 @@
 
 # client.py
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
 import queue
 import socket
 import threading
@@ -26,6 +26,7 @@ import hmac
 import secrets
 import ctypes
 from datetime import datetime
+import customtkinter as ctk
 from network import send_msg, recv_msg
 from crypto_utils import (
     IdentityKeyManager,
@@ -36,7 +37,9 @@ from crypto_utils import (
 )
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.asymmetric import x25519
 
 try:
     import pystray
@@ -76,7 +79,10 @@ class ChatClient:
         self.running = False
         self.username = None
         self.callback = None
+        self.session_id = None
+        self.session_key = None
         self.token = None
+        self._last_auth_timestamp = 0
 
         # 身份密钥 (Ed25519)
         self.id_priv = None
@@ -88,6 +94,7 @@ class ChatClient:
         # 服务器公钥
         self.server_ed25519_pub = None
         self.server_x25519_pub = None
+        self.require_invite_for_register = None
 
         # 用户公钥缓存
         self.user_pubkeys = {}  # username -> {'ed25519': ..., 'x25519': ...}
@@ -193,6 +200,47 @@ class ChatClient:
     def _fingerprint_from_bytes(self, pem_str):
         return hashlib.sha256(pem_str.encode('utf-8')).hexdigest()
 
+    def _canonical_json(self, data):
+        return json.dumps(data or {}, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+    def _build_authenticated_payload(self, cmd, data=None):
+        if not self.session_id or not self.session_key:
+            raise ValueError('会话未建立')
+        payload_data = data or {}
+        timestamp = int(time.time() * 1000)
+        if timestamp <= self._last_auth_timestamp:
+            timestamp = self._last_auth_timestamp + 1
+        self._last_auth_timestamp = timestamp
+        message = f'{self.session_id}{timestamp}{self._canonical_json(payload_data)}'.encode('utf-8')
+        signature = hmac.new(self.session_key, message, hashlib.sha256).hexdigest()
+        return {
+            'cmd': cmd,
+            'session_id': self.session_id,
+            'timestamp': timestamp,
+            'hmac': signature,
+            'data': payload_data,
+        }
+
+    def _decrypt_session_key(self, encrypted_session_key):
+        eph_pub_bytes = base64.b64decode(encrypted_session_key['eph_pub'])
+        ct = base64.b64decode(encrypted_session_key['ct'])
+        tag = base64.b64decode(encrypted_session_key['tag'])
+        eph_pub = x25519.X25519PublicKey.from_public_bytes(eph_pub_bytes)
+        shared_secret = self.x_priv.exchange(eph_pub)
+        hkdf = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32 + 12,
+            salt=None,
+            info=b'kaleidotalk-session-key',
+            backend=default_backend(),
+        )
+        key_material = hkdf.derive(shared_secret)
+        aes_key = key_material[:32]
+        nonce = key_material[32:44]
+        cipher = Cipher(algorithms.AES(aes_key), modes.GCM(nonce, tag), backend=default_backend())
+        decryptor = cipher.decryptor()
+        return decryptor.update(ct) + decryptor.finalize()
+
     # ------------------------------------------------------------------
     # 连接与协议通信
     def connect(self):
@@ -214,6 +262,8 @@ class ChatClient:
 
             # 请求服务器公钥
             self._send({'cmd': 'get_server_pubkey'})
+            # 查询注册策略（是否需要邀请码）
+            self._send({'cmd': 'get_reg_policy'})
             return True
         except socket.timeout:
             if self.callback:
@@ -319,6 +369,9 @@ class ChatClient:
             if self.callback:
                 self.callback('SUCCESS', '注册成功，请登录')
 
+        elif cmd == 'reg_policy':
+            self.require_invite_for_register = bool(data.get('require_invite', False))
+
         elif cmd == 'login':
             if status == 'challenge':
                 challenge = data['challenge']
@@ -331,7 +384,8 @@ class ChatClient:
                     self.callback('ERROR', f'未知登录响应状态: {status}')
                 return
 
-            self.token = data['token']
+            self.session_id = data['session_id']
+            self.token = None
             self.username = self.pending_login_user
             self.pending_login_user = None
 
@@ -369,6 +423,14 @@ class ChatClient:
                     self._disconnect_cleanup()
                     return
 
+            try:
+                self.session_key = self._decrypt_session_key(data['encrypted_session_key'])
+            except Exception as e:
+                if self.callback:
+                    self.callback('ERROR', f'会话密钥解密失败: {e}')
+                self._disconnect_cleanup()
+                return
+
             # 缓存自己的公钥
             self.user_pubkeys[self.username] = {
                 'ed25519': self.id_pub,
@@ -392,8 +454,8 @@ class ChatClient:
             ed_pub = IdentityKeyManager.deserialize_public_key(data['ed25519_pub'])
             x_pub = ExchangeKeyManager.deserialize_public_key(data['x25519_pub'])
             self.user_pubkeys[username] = {'ed25519': ed_pub, 'x25519': x_pub}
-            self._flush_pending_outgoing_messages(username)
-            # 检查是否有待验证消息
+            # 收到公钥后，先处理对该用户的发送前验证，再处理待发消息
+            self._check_pending_outgoing_verification(username)
             self._check_pending_verification(username)
 
         elif cmd == 'users':
@@ -402,7 +464,9 @@ class ChatClient:
                 self.callback('USERS', users)
 
         elif cmd == 'logout':
-            self._disconnect_cleanup()
+            self._clear_session_state()
+            if self.callback:
+                self.callback('UPDATE_BUTTONS', None)
 
     # ------------------------------------------------------------------
     # 消息加解密与缓存
@@ -466,10 +530,10 @@ class ChatClient:
             self.user_pubkeys[receiver]['x25519'],
             self.id_priv
         )
-        return self._send({'cmd': 'message', 'token': self.token, 'data': {
+        return self._send(self._build_authenticated_payload('message', {
             'receiver': receiver,
-            'payload': enc
-        }})
+            'payload': enc,
+        }))
 
     def _check_pending_verification(self, username):
         with self.pending_msg_lock:
@@ -483,6 +547,23 @@ class ChatClient:
                 msgs = self.pending_messages.pop(username, [])
             for payload in msgs:
                 self._decrypt_and_display(username, payload)
+            return
+
+        if self._begin_verification(username):
+            finger = self._fingerprint_from_bytes(
+                IdentityKeyManager.serialize_public_key(self.user_pubkeys[username]['ed25519'])
+            )
+            self.callback('USER_VERIFY', {'username': username, 'fingerprint': finger})
+
+    def _check_pending_outgoing_verification(self, username):
+        with self.pending_outgoing_lock:
+            has_pending = username in self.pending_outgoing_messages and bool(self.pending_outgoing_messages[username])
+
+        if not has_pending:
+            return
+
+        if self._is_user_trusted(username):
+            self._flush_pending_outgoing_messages(username)
             return
 
         if self._begin_verification(username):
@@ -514,6 +595,7 @@ class ChatClient:
             msgs = self.pending_messages.pop(username, [])
         for payload in msgs:
             self._decrypt_and_display(username, payload)
+        self._flush_pending_outgoing_messages(username)
         self._end_verification(username)
         return True
 
@@ -528,6 +610,49 @@ class ChatClient:
         return self._fingerprint_from_bytes(
             IdentityKeyManager.serialize_public_key(self.user_pubkeys[username]['ed25519'])
         )
+
+    def get_fingerprint_words(self, username, word_count=6):
+        """获取指定用户的指纹单词列表
+        
+        Args:
+            username: 用户名
+            word_count: 单词数（默认 6）
+        
+        Returns:
+            单词列表，如果用户不存在或公钥不可用则返回 None
+        """
+        fingerprint_hex = self.get_user_fingerprint(username)
+        if not fingerprint_hex:
+            return None
+        try:
+            from crypto_utils import FingerprintWords
+            return FingerprintWords.fingerprint_to_words(fingerprint_hex, word_count)
+        except Exception as e:
+            if self.callback:
+                self.callback('ERROR', f"生成指纹单词失败: {e}")
+            return None
+
+    def get_own_fingerprint_words(self, word_count=6):
+        """获取当前用户自己的指纹单词列表
+        
+        Args:
+            word_count: 单词数（默认 6）
+        
+        Returns:
+            单词列表，如果身份密钥未生成则返回 None
+        """
+        if not self.id_pub:
+            return None
+        try:
+            from crypto_utils import FingerprintWords
+            fingerprint_hex = self._fingerprint_from_bytes(
+                IdentityKeyManager.serialize_public_key(self.id_pub)
+            )
+            return FingerprintWords.fingerprint_to_words(fingerprint_hex, word_count)
+        except Exception as e:
+            if self.callback:
+                self.callback('ERROR', f"生成自己的指纹单词失败: {e}")
+            return None
 
     def _begin_verification(self, username):
         with self.pending_verifications_lock:
@@ -599,6 +724,10 @@ class ChatClient:
         })
 
     def register(self, username, password, store_private_key=True, invite_code=''):
+        # 若当前已登录，先退出会话，避免 token 与新身份密钥混用
+        if self.token:
+            self.logout()
+
         # 生成密钥对
         id_priv, id_pub = IdentityKeyManager.generate()
         x_priv, x_pub = ExchangeKeyManager.generate()
@@ -693,6 +822,10 @@ class ChatClient:
             if self.callback:
                 self.callback('ERROR', '未加载本地身份私钥，无法发送消息')
             return False
+        if not self.session_id or not self.session_key:
+            if self.callback:
+                self.callback('ERROR', '会话未建立，无法发送消息')
+            return False
         if not re.match(r'^[A-Za-z0-9]{3,20}$', receiver):
             if self.callback:
                 self.callback('ERROR', '用户名格式无效')
@@ -700,24 +833,38 @@ class ChatClient:
         if receiver not in self.user_pubkeys or 'x25519' not in self.user_pubkeys[receiver]:
             self._queue_pending_outgoing_message(receiver, plaintext)
             self._request_public_key(receiver)
-            if self.callback:
-                self.callback('SYS', f'正在获取 {receiver} 的公钥，消息将自动发送')
+            return True
+        if not self._is_user_trusted(receiver):
+            self._queue_pending_outgoing_message(receiver, plaintext)
+            if self._begin_verification(receiver):
+                finger = self._fingerprint_from_bytes(
+                    IdentityKeyManager.serialize_public_key(self.user_pubkeys[receiver]['ed25519'])
+                )
+                self.callback('USER_VERIFY', {'username': receiver, 'fingerprint': finger})
             return True
         return self._send_encrypted_message(receiver, plaintext)
 
     def _request_public_key(self, username):
-        self._send({'cmd': 'get_pubkey', 'token': self.token, 'data': {'username': username}})
+        self._send(self._build_authenticated_payload('get_pubkey', {'username': username}))
 
     def _request_online_users(self):
-        self._send({'cmd': 'list_users', 'token': self.token})
+        self._send(self._build_authenticated_payload('list_users'))
 
     def logout(self):
-        if self.token:
-            self._send({'cmd': 'logout', 'token': self.token})
-        self._disconnect_cleanup()
+        if self.session_id and self.session_key:
+            try:
+                self._send(self._build_authenticated_payload('logout'))
+            except Exception:
+                pass
+        self._clear_session_state()
+        if self.callback:
+            self.callback('UPDATE_BUTTONS', None)
 
-    def _disconnect_cleanup(self):
-        self.running = False
+    def _clear_session_state(self):
+        """仅清理登录态，不断开与服务器的连接。"""
+        self.session_id = None
+        self.session_key = None
+        self._last_auth_timestamp = 0
         self.token = None
         self.username = None
         self.pending_login_user = None
@@ -726,8 +873,6 @@ class ChatClient:
         self.id_pub = None
         self.x_priv = None
         self.x_pub = None
-        self.server_ed25519_pub = None
-        self.server_x25519_pub = None
         self.user_pubkeys.clear()
         with self.pending_msg_lock:
             self.pending_messages.clear()
@@ -736,6 +881,12 @@ class ChatClient:
         with self.pending_verifications_lock:
             self.pending_verifications.clear()
         self.clear_password()
+
+    def _disconnect_cleanup(self):
+        self.running = False
+        self._clear_session_state()
+        self.server_ed25519_pub = None
+        self.server_x25519_pub = None
         if self.sock:
             try:
                 self.sock.close()
@@ -771,23 +922,35 @@ class ChatGUI:
     USER_LIST_REFRESH_MS = 5000
 
     def __init__(self):
-        self.root = tk.Tk()
+        ctk.set_appearance_mode("dark")
+        self.root = ctk.CTk()
         # 设置全局默认字体，确保 ttk 控件和弹窗使用 Verdana
         default_font = ('Verdana', 10)
         self.root.option_add('*Font', default_font)
         self.root.option_add('*Dialog.msg.Font', default_font)
         self.root.title("万花筒聊天软件 V2.2")
-        self.root.geometry("850x650")
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        width = min(1100, max(900, screen_w - 120))
+        height = min(760, max(650, screen_h - 140))
+        self.root.geometry(f"{width}x{height}")
+        self.root.minsize(900, 650)
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.root.bind("<Unmap>", self.on_window_unmap)
 
         self.message_queue = queue.Queue()
         self.client = ChatClient()
         self.client.callback = self.on_message_received
+        self._pending_register = None
 
         self.is_minimized_to_tray = False
         self.tray_icon = None
         self.is_exiting = False
+        self._context_menu = None
+        self._context_menu_user = None
+        self._displayed_users = []
+        self._user_rows = {}
+        self.selected_user = None
         self._color_palette = [
             '#1f77b4',
             '#2ca02c',
@@ -807,7 +970,7 @@ class ChatGUI:
     # ------------------------------------------------------------------
     # UI 构建
     def setup_ui(self):
-        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame = ctk.CTkFrame(self.root, corner_radius=0)
         main_frame.grid(row=0, column=0, sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
@@ -815,82 +978,74 @@ class ChatGUI:
         main_frame.rowconfigure(1, weight=1)
 
         # 工具栏
-        toolbar = ttk.Frame(main_frame)
+        toolbar = ctk.CTkFrame(main_frame, fg_color="transparent")
         toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 10))
 
-        self.status_label = ttk.Label(toolbar, text="未连接", foreground="red")
+        self.status_label = ctk.CTkLabel(toolbar, text="未连接", text_color="#ff6b6b")
         self.status_label.pack(side=tk.LEFT, padx=(0, 10))
 
-        self.user_label = ttk.Label(toolbar, text="未登录")
+        self.user_label = ctk.CTkLabel(toolbar, text="未登录")
         self.user_label.pack(side=tk.LEFT, padx=(0, 10))
+        self.user_label.bind("<Button-1>", self._on_user_label_click)
 
-        self.crypto_label = ttk.Label(toolbar, text="🔓 无加密", foreground="red")
+        self.crypto_label = ctk.CTkLabel(toolbar, text="🔓 无加密", text_color="#ff6b6b")
         self.crypto_label.pack(side=tk.LEFT, padx=(0, 10))
 
-        self.connect_btn = ttk.Button(toolbar, text="连接", command=self.connect_to_server)
+        self.connect_btn = ctk.CTkButton(toolbar, text="连接", command=self.connect_to_server, corner_radius=8)
         self.connect_btn.pack(side=tk.LEFT, padx=2)
 
-        self.register_btn = ttk.Button(toolbar, text="注册", command=self.register_user, state=tk.DISABLED)
+        self.register_btn = ctk.CTkButton(toolbar, text="注册", command=self.register_user, state=tk.DISABLED, corner_radius=8)
         self.register_btn.pack(side=tk.LEFT, padx=2)
 
-        self.login_btn = ttk.Button(toolbar, text="登录", command=self.login_user, state=tk.DISABLED)
+        self.login_btn = ctk.CTkButton(toolbar, text="登录", command=self.login_user, state=tk.DISABLED, corner_radius=8)
         self.login_btn.pack(side=tk.LEFT, padx=2)
 
-        self.logout_btn = ttk.Button(toolbar, text="登出", command=self.logout_user, state=tk.DISABLED)
+        self.logout_btn = ctk.CTkButton(toolbar, text="登出", command=self.logout_user, state=tk.DISABLED, corner_radius=8)
         self.logout_btn.pack(side=tk.LEFT, padx=2)
-        self.about_btn = ttk.Button(toolbar, text="关于", command=self.show_about)
+        self.about_btn = ctk.CTkButton(toolbar, text="关于", command=self.show_about, corner_radius=8)
         self.about_btn.pack(side=tk.LEFT, padx=2)
 
         # 聊天区域
-        chat_frame = ttk.Frame(main_frame)
+        chat_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         chat_frame.grid(row=1, column=0, sticky="nsew")
         chat_frame.columnconfigure(0, weight=1)
         chat_frame.rowconfigure(0, weight=1)
 
-        self.chat_display = scrolledtext.ScrolledText(
-            chat_frame, wrap=tk.WORD, width=50, height=20, state=tk.DISABLED)
+        self.chat_display = ctk.CTkTextbox(
+            chat_frame, wrap="word", width=50, height=20, state=tk.DISABLED, corner_radius=8)
         self.chat_display.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
 
-        # 在线用户列表（Treeview 加信任列）
-        users_frame = ttk.LabelFrame(chat_frame, text="在线用户", padding="5")
+        # 在线用户列表（自定义滚动列表）
+        users_frame = ctk.CTkFrame(chat_frame, corner_radius=8)
         users_frame.grid(row=0, column=1, sticky="ns")
-        columns = ('user', 'trust')
-        self.users_tree = ttk.Treeview(users_frame, columns=columns, show='headings', height=20)
-        self.users_tree.heading('user', text='用户')
-        self.users_tree.heading('trust', text='信任')
-        self.users_tree.column('user', width=100)
-        self.users_tree.column('trust', width=60)
-        self.users_tree.pack(fill=tk.BOTH, expand=True)
-
-        # 右键菜单
-        self.tree_menu = tk.Menu(self.root, tearoff=0)
-        self.tree_menu.add_command(label="验证指纹", command=self.verify_selected_user)
-        self.tree_menu.add_command(label="移除信任", command=self.distrust_selected_user)
-        self.tree_menu.add_separator()
-        self.tree_menu.add_command(label="复制指纹", command=self.copy_fingerprint)
-        self.users_tree.bind("<Button-3>", self.on_tree_right_click)
-        self.users_tree.bind("<Double-1>", self.on_user_double_click)
+        ctk.CTkLabel(users_frame, text="在线用户", font=("Verdana", 12, "bold")).pack(anchor="w", padx=8, pady=(8, 4))
+        header = ctk.CTkFrame(users_frame, fg_color="transparent")
+        header.pack(fill=tk.X, padx=8, pady=(0, 4))
+        ctk.CTkLabel(header, text="用户", width=120, anchor="w").pack(side=tk.LEFT)
+        ctk.CTkLabel(header, text="信任", width=50, anchor="e").pack(side=tk.RIGHT)
+        self.users_list_frame = ctk.CTkScrollableFrame(users_frame, width=220, height=460, corner_radius=6)
+        self.users_list_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
 
         # 发送区域
-        send_frame = ttk.Frame(main_frame)
+        send_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         send_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
         send_frame.columnconfigure(0, weight=1)
 
-        receiver_frame = ttk.Frame(send_frame)
+        receiver_frame = ctk.CTkFrame(send_frame, fg_color="transparent")
         receiver_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
-        ttk.Label(receiver_frame, text="发送给:").pack(side=tk.LEFT, padx=(0, 5))
-        self.receiver_entry = ttk.Entry(receiver_frame, width=15)
+        ctk.CTkLabel(receiver_frame, text="发送给:").pack(side=tk.LEFT, padx=(0, 5))
+        self.receiver_entry = ctk.CTkEntry(receiver_frame, width=150, corner_radius=6)
         self.receiver_entry.pack(side=tk.LEFT)
 
-        input_frame = ttk.Frame(send_frame)
+        input_frame = ctk.CTkFrame(send_frame, fg_color="transparent")
         input_frame.grid(row=1, column=0, sticky="ew")
         input_frame.columnconfigure(0, weight=1)
 
-        self.message_entry = ttk.Entry(input_frame)
+        self.message_entry = ctk.CTkEntry(input_frame, corner_radius=6)
         self.message_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5))
         self.message_entry.bind('<Return>', lambda e: self.send_message())
 
-        self.send_btn = ttk.Button(input_frame, text="发送", command=self.send_message, state=tk.DISABLED)
+        self.send_btn = ctk.CTkButton(input_frame, text="发送", command=self.send_message, state=tk.DISABLED, corner_radius=8)
         self.send_btn.grid(row=0, column=1)
 
         self.update_button_states()
@@ -899,48 +1054,48 @@ class ChatGUI:
     # 按钮状态
     def update_button_states(self):
         if self.client and self.client.sock:
-            self.connect_btn.config(state=tk.DISABLED)
+            self.connect_btn.configure(state=tk.DISABLED)
             if self.client.server_ed25519_pub:
-                self.register_btn.config(state=tk.NORMAL)
-                self.login_btn.config(state=tk.NORMAL)
+                self.register_btn.configure(state=tk.NORMAL)
+                self.login_btn.configure(state=tk.NORMAL)
             else:
-                self.register_btn.config(state=tk.DISABLED)
-                self.login_btn.config(state=tk.DISABLED)
+                self.register_btn.configure(state=tk.DISABLED)
+                self.login_btn.configure(state=tk.DISABLED)
 
-            if self.client.token:
-                self.logout_btn.config(state=tk.NORMAL)
-                self.send_btn.config(state=tk.NORMAL)
-                self.user_label.config(text=f"用户: {self.client.username}")
-                self.crypto_label.config(text="🔐 端到端加密", foreground="green")
+            if self.client.session_id and self.client.session_key:
+                self.logout_btn.configure(state=tk.NORMAL)
+                self.send_btn.configure(state=tk.NORMAL)
+                self.user_label.configure(text=f"用户: {self.client.username}")
+                self.crypto_label.configure(text="🔐 端到端加密", text_color="#6ee7b7")
             else:
-                self.logout_btn.config(state=tk.DISABLED)
-                self.send_btn.config(state=tk.DISABLED)
-                self.user_label.config(text="未登录")
-                self.crypto_label.config(text="🔓 未加密", foreground="red")
+                self.logout_btn.configure(state=tk.DISABLED)
+                self.send_btn.configure(state=tk.DISABLED)
+                self.user_label.configure(text="未登录")
+                self.crypto_label.configure(text="🔓 未加密", text_color="#ff6b6b")
         else:
-            self.connect_btn.config(state=tk.NORMAL)
-            self.register_btn.config(state=tk.DISABLED)
-            self.login_btn.config(state=tk.DISABLED)
-            self.logout_btn.config(state=tk.DISABLED)
-            self.send_btn.config(state=tk.DISABLED)
+            self.connect_btn.configure(state=tk.NORMAL)
+            self.register_btn.configure(state=tk.DISABLED)
+            self.login_btn.configure(state=tk.DISABLED)
+            self.logout_btn.configure(state=tk.DISABLED)
+            self.send_btn.configure(state=tk.DISABLED)
             # 未连接时恢复状态标签为默认未连接样式
-            self.status_label.config(text="未连接", foreground="red")
-            self.user_label.config(text="未登录")
-            self.crypto_label.config(text="🔓 未加密", foreground="red")
+            self.status_label.configure(text="未连接", text_color="#ff6b6b")
+            self.user_label.configure(text="未登录")
+            self.crypto_label.configure(text="🔓 未加密", text_color="#ff6b6b")
 
     # ------------------------------------------------------------------
     def _dialog_input(self, title, prompt, show=None, initial=''):
-        dlg = tk.Toplevel(self.root)
+        dlg = ctk.CTkToplevel(self.root)
         dlg.title(title)
         dlg.transient(self.root)
         dlg.grab_set()
         dlg.attributes('-topmost', True)
-        dlg.geometry("400x180")
-        dlg.resizable(False, False)
+        dlg.geometry("420x190")
+        dlg.resizable(True, True)
 
-        ttk.Label(dlg, text=prompt, wraplength=350).pack(pady=(20, 10), padx=20)
+        ctk.CTkLabel(dlg, text=prompt, wraplength=350).pack(pady=(20, 10), padx=20)
         var = tk.StringVar(value=initial)
-        entry = ttk.Entry(dlg, textvariable=var, width=40, show=show)
+        entry = ctk.CTkEntry(dlg, textvariable=var, width=280, show=show, corner_radius=6)
         entry.pack(pady=(0, 10))
         entry.focus_set()
         result = None
@@ -955,36 +1110,41 @@ class ChatGUI:
 
         entry.bind('<Return>', lambda e: on_ok())
         entry.bind('<Escape>', lambda e: on_cancel())
-        btn_frame = ttk.Frame(dlg)
+        btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
         btn_frame.pack()
-        ttk.Button(btn_frame, text="确定", command=on_ok, width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="取消", command=on_cancel, width=10).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(btn_frame, text="确定", command=on_ok, width=90, corner_radius=8).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(btn_frame, text="取消", command=on_cancel, width=90, corner_radius=8).pack(side=tk.LEFT, padx=5)
 
         self.center_dialog(dlg)
+        dlg.update_idletasks()
+        entry.focus_force()
         self.root.wait_window(dlg)
         return result
     def _dialog_choice(self, title, message, choices):
-        dlg = tk.Toplevel(self.root)
+        dlg = ctk.CTkToplevel(self.root)
         dlg.title(title)
         dlg.transient(self.root)
         dlg.grab_set()
         dlg.attributes('-topmost', True)
-        dlg.geometry("500x250")
-        dlg.resizable(False, False)
+        dlg.geometry("560x300")
+        dlg.resizable(True, True)
 
-        ttk.Label(dlg, text=message, justify=tk.LEFT, wraplength=450).pack(pady=(20, 10), padx=20)
+        ctk.CTkLabel(dlg, text=message, justify=tk.LEFT, wraplength=450).pack(pady=(20, 10), padx=20)
         # 使用单选列表 + 确认按钮，以便显示较长描述文本
         sel_var = tk.IntVar(value=-1)
-        list_frame = ttk.Frame(dlg)
+        list_frame = ctk.CTkScrollableFrame(dlg, width=450, height=120, corner_radius=6)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=20)
 
         for idx, (text, val) in enumerate(choices):
-            row = ttk.Frame(list_frame)
+            row = ctk.CTkFrame(list_frame, fg_color="transparent")
             row.pack(fill=tk.X, pady=4)
-            rb = ttk.Radiobutton(row, variable=sel_var, value=idx)
+            rb = ctk.CTkRadioButton(row, text="", variable=sel_var, value=idx)
             rb.pack(side=tk.LEFT)
-            lbl = ttk.Label(row, text=text, wraplength=420, justify=tk.LEFT)
+            lbl = ctk.CTkLabel(row, text=text, wraplength=420, justify=tk.LEFT)
             lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6,0))
+            # 保存第一个单选按钮用于获取焦点
+            if idx == 0:
+                first_rb = rb
 
         result = [None]
 
@@ -1000,21 +1160,45 @@ class ChatGUI:
             result[0] = None
             dlg.destroy()
 
-        btn_frame = ttk.Frame(dlg)
+        btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
         btn_frame.pack(pady=8)
-        ttk.Button(btn_frame, text="确定", command=on_ok, width=12).pack(side=tk.LEFT, padx=6)
-        ttk.Button(btn_frame, text="取消", command=on_cancel, width=12).pack(side=tk.LEFT, padx=6)
+        ctk.CTkButton(btn_frame, text="确定", command=on_ok, width=110, corner_radius=8).pack(side=tk.LEFT, padx=6)
+        ctk.CTkButton(btn_frame, text="取消", command=on_cancel, width=110, corner_radius=8).pack(side=tk.LEFT, padx=6)
 
         dlg.bind('<Escape>', lambda e: on_cancel())
         self.center_dialog(dlg)
+        dlg.update_idletasks()
+        if 'first_rb' in locals():
+            first_rb.focus_force()
         self.root.wait_window(dlg)
         return result[0]
 
     def _dialog_showinfo(self, title, message):
-        messagebox.showinfo(title, message)
+        self._dialog_message(title, message)
 
     def _dialog_showerror(self, title, message):
-        messagebox.showerror(title, message)
+        self._dialog_message(title, message)
+
+    def _dialog_message(self, title, message):
+        dlg = ctk.CTkToplevel(self.root)
+        dlg.title(title)
+        dlg.transient(self.root)
+        dlg.grab_set()
+        dlg.attributes('-topmost', True)
+        dlg.geometry("560x320")
+        dlg.resizable(True, True)
+
+        content_frame = ctk.CTkScrollableFrame(dlg, corner_radius=6)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(20, 12))
+        ctk.CTkLabel(content_frame, text=message, justify=tk.LEFT, wraplength=500).pack(anchor="w", fill=tk.BOTH, expand=True)
+
+        btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
+        btn_frame.pack(pady=(0, 14))
+        ctk.CTkButton(btn_frame, text="确定", command=dlg.destroy, width=100, corner_radius=8).pack()
+
+        dlg.bind('<Escape>', lambda e: dlg.destroy())
+        self.center_dialog(dlg)
+        self.root.wait_window(dlg)
 
     def show_about(self):
         about_text = (
@@ -1039,10 +1223,14 @@ class ChatGUI:
 
     def center_dialog(self, dialog):
         dialog.update_idletasks()
-        w = dialog.winfo_width()
-        h = dialog.winfo_height()
-        x = (dialog.winfo_screenwidth() // 2) - (w // 2)
-        y = (dialog.winfo_screenheight() // 2) - (h // 2)
+        req_w = max(dialog.winfo_width(), dialog.winfo_reqwidth())
+        req_h = max(dialog.winfo_height(), dialog.winfo_reqheight())
+        screen_w = dialog.winfo_screenwidth()
+        screen_h = dialog.winfo_screenheight()
+        w = min(req_w, max(320, screen_w - 80))
+        h = min(req_h, max(180, screen_h - 120))
+        x = max(0, (screen_w // 2) - (w // 2))
+        y = max(0, (screen_h // 2) - (h // 2))
         dialog.geometry(f'{w}x{h}+{x}+{y}')
 
     # ------------------------------------------------------------------
@@ -1061,10 +1249,10 @@ class ChatGUI:
         self.client.callback = self.on_message_received
         ok = self.client.connect()
         if ok:
-            self.status_label.config(text="已连接", foreground="green")
+            self.status_label.configure(text="已连接", text_color="#6ee7b7")
             self.append_chat("系统", "已连接到服务器", "green")
         else:
-            self.status_label.config(text="连接失败", foreground="red")
+            self.status_label.configure(text="连接失败", text_color="#ff6b6b")
             self._dialog_showerror("错误", "无法连接到服务器")
         self.update_button_states()
 
@@ -1072,6 +1260,9 @@ class ChatGUI:
         if not self.client.server_ed25519_pub:
             self._dialog_showerror("错误", "服务器公钥未就绪")
             return
+        if self.client.session_id and self.client.session_key:
+            self.client.logout()
+            self.append_chat("系统", "检测到当前账号已登录，已自动登出后继续注册")
         username = self._dialog_input("注册", "用户名 (3-20字母数字):")
         if not username or not re.match(r'^[A-Za-z0-9]{3,20}$', username):
             return
@@ -1086,18 +1277,27 @@ class ChatGUI:
         if choice is None:
             return
 
+        # 记录本次注册请求，若服务端返回 invite_required 可自动补填并重试
+        self._pending_register = {
+            'username': username,
+            'password': pw,
+            'store_private_key': choice,
+            'invite_code': '',
+        }
+
         invite = ''
         if self._reg_policy_required():
             invite = self._dialog_input("邀请码", "请输入邀请码:")
             if not invite:
+                self._pending_register = None
                 return
+            self._pending_register['invite_code'] = invite
 
         self.client.register(username, pw, store_private_key=choice, invite_code=invite)
 
     def _reg_policy_required(self):
-        # 简化：注册时服务器会返回错误，但此处可以先查询策略
-        # 这里直接返回 False 以避免额外命令，服务器端会检查
-        return False
+        # 连接后客户端会主动查询 get_reg_policy
+        return bool(self.client.require_invite_for_register)
 
     def login_user(self):
         if not self.client.server_ed25519_pub:
@@ -1127,19 +1327,20 @@ class ChatGUI:
             self.message_entry.delete(0, tk.END)
 
     def append_chat(self, source, message, color=None):
-        self.chat_display.config(state=tk.NORMAL)
+        self.chat_display.configure(state=tk.NORMAL)
         ts = time.strftime("%H:%M:%S")
         line = f"[{ts}] {source}: {message}\n"
         if color is None or color == 'auto':
             color = self._color_for_name(source)
         tag_name = f"fg_{color.lstrip('#').replace(' ', '_')}"
-        self.chat_display.tag_configure(tag_name, foreground=color)
-        start_index = self.chat_display.index(tk.END)
-        self.chat_display.insert(tk.END, line)
-        end_index = self.chat_display.index(tk.END)
-        self.chat_display.tag_add(tag_name, start_index, end_index)
-        self.chat_display.see(tk.END)
-        self.chat_display.config(state=tk.DISABLED)
+        text_widget = self.chat_display._textbox if hasattr(self.chat_display, '_textbox') else self.chat_display
+        text_widget.tag_configure(tag_name, foreground=color)
+        start_index = text_widget.index(tk.END)
+        text_widget.insert(tk.END, line)
+        end_index = text_widget.index(tk.END)
+        text_widget.tag_add(tag_name, start_index, end_index)
+        text_widget.see(tk.END)
+        self.chat_display.configure(state=tk.DISABLED)
 
     def _color_for_name(self, name):
         if name in self._name_colors:
@@ -1166,9 +1367,27 @@ class ChatGUI:
         if msg_type == 'SYS':
             self.append_chat("系统", content)
         elif msg_type == 'ERROR':
+            if content == 'invite_required' and self._pending_register is not None:
+                invite = self._dialog_input("邀请码", "该服务器要求邀请码，请输入邀请码:")
+                if invite:
+                    self._pending_register['invite_code'] = invite
+                    self.client.register(
+                        self._pending_register['username'],
+                        self._pending_register['password'],
+                        store_private_key=self._pending_register['store_private_key'],
+                        invite_code=invite,
+                    )
+                    return
             self.append_chat("错误", content)
         elif msg_type == 'SUCCESS':
             self.append_chat("成功", content)
+            if isinstance(content, str) and ('注册成功' in content):
+                registered_username = None
+                if self._pending_register:
+                    registered_username = self._pending_register.get('username')
+                self._pending_register = None
+                # 在注册成功后弹出指纹单词对话框
+                self.root.after(500, lambda u=registered_username: self._show_own_fingerprint_after_register(u))
             self.update_button_states()
         elif msg_type == 'MESSAGE':
             if isinstance(content, dict):
@@ -1211,29 +1430,102 @@ class ChatGUI:
     # ------------------------------------------------------------------
     # 用户列表
     def _update_user_list(self, users):
-        self.users_tree.delete(*self.users_tree.get_children())
-        for u in users:
-            if u == self.client.username:
-                continue
+        for widget in self.users_list_frame.winfo_children():
+            widget.destroy()
+
+        filtered_users = [u for u in users if u != self.client.username]
+        self._displayed_users = filtered_users
+        self._user_rows.clear()
+
+        if self.selected_user and self.selected_user not in filtered_users:
+            self.selected_user = None
+
+        for u in filtered_users:
             trust_status = "✓" if self.client._is_user_trusted(u) else "?"
-            self.users_tree.insert("", tk.END, values=(u, trust_status))
+            row = ctk.CTkFrame(self.users_list_frame, corner_radius=6)
+            row.pack(fill=tk.X, pady=2, padx=2)
+
+            name_label = ctk.CTkLabel(row, text=u, anchor='w')
+            name_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 4), pady=6)
+            trust_label = ctk.CTkLabel(row, text=trust_status, width=30, anchor='e')
+            trust_label.pack(side=tk.RIGHT, padx=(4, 8), pady=6)
+
+            self._user_rows[u] = row
+            self._bind_user_row_events(row, name_label, trust_label, u)
+
+        if self.selected_user:
+            self._select_user(self.selected_user)
 
     def refresh_online_users(self):
-        if self.client and self.client.sock and self.client.token:
+        if self.client and self.client.sock and self.client.session_id and self.client.session_key:
             self.client._request_online_users()
         self.root.after(self.USER_LIST_REFRESH_MS, self.refresh_online_users)
 
-    def on_tree_right_click(self, event):
-        item = self.users_tree.identify_row(event.y)
-        if item:
-            self.users_tree.selection_set(item)
-            self.tree_menu.post(event.x_root, event.y_root)
+    def _bind_user_row_events(self, row, name_label, trust_label, username):
+        for widget in (row, name_label, trust_label):
+            widget.bind("<Button-1>", lambda e, u=username: self._on_user_click(u))
+            widget.bind("<Double-1>", lambda e, u=username: self.on_user_double_click(u))
+            widget.bind("<Button-3>", lambda e, u=username: self.on_tree_right_click(e, u))
 
-    def on_user_double_click(self, event):
-        item = self.users_tree.focus()
-        if not item:
+    def _on_user_click(self, username):
+        self._select_user(username)
+
+    def _select_user(self, username):
+        self.selected_user = username
+        for u, row in self._user_rows.items():
+            if u == username:
+                row.configure(fg_color=("#d9d9d9", "#2f2f2f"))
+            else:
+                row.configure(fg_color=("#f2f2f2", "#343638"))
+
+    def on_tree_right_click(self, event, username=None):
+        if username:
+            self._select_user(username)
+        if self.selected_user:
+            self._show_context_menu(event.x_root, event.y_root, self.selected_user)
+
+    def _show_context_menu(self, x, y, username):
+        self._close_context_menu()
+        self._context_menu_user = username
+        menu = ctk.CTkToplevel(self.root)
+        menu.overrideredirect(True)
+        menu.attributes('-topmost', True)
+        menu.geometry(f"180x160+{x}+{y}")
+
+        container = ctk.CTkFrame(menu, corner_radius=8)
+        container.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+
+        ctk.CTkButton(container, text="验证指纹", corner_radius=8,
+                      command=lambda: self._menu_action(self.verify_selected_user)).pack(fill=tk.X, padx=8, pady=(8, 4))
+        ctk.CTkButton(container, text="移除信任", corner_radius=8,
+                      command=lambda: self._menu_action(self.distrust_selected_user)).pack(fill=tk.X, padx=8, pady=4)
+        ctk.CTkButton(container, text="复制指纹", corner_radius=8,
+                      command=lambda: self._menu_action(self.copy_fingerprint)).pack(fill=tk.X, padx=8, pady=4)
+        ctk.CTkButton(container, text="关闭", corner_radius=8,
+                      command=self._close_context_menu).pack(fill=tk.X, padx=8, pady=(4, 8))
+
+        menu.bind("<FocusOut>", lambda e: self._close_context_menu())
+        menu.focus_force()
+        self._context_menu = menu
+
+    def _menu_action(self, action):
+        self._close_context_menu()
+        action()
+
+    def _close_context_menu(self):
+        if self._context_menu:
+            try:
+                self._context_menu.destroy()
+            except Exception:
+                pass
+        self._context_menu = None
+
+    def on_user_double_click(self, username=None):
+        if not username:
+            username = self.selected_user
+        if not username:
             return
-        username = self.users_tree.item(item, 'values')[0]
+        self._select_user(username)
         self.receiver_entry.delete(0, tk.END)
         self.receiver_entry.insert(0, username)
         # 请求公钥（如果还没有）
@@ -1242,27 +1534,24 @@ class ChatGUI:
         self.message_entry.focus()
 
     def verify_selected_user(self):
-        item = self.users_tree.focus()
-        if not item:
+        username = self.selected_user
+        if not username:
             return
-        username = self.users_tree.item(item, 'values')[0]
         finger = self.client.get_user_fingerprint(username)
         if finger:
             self._show_user_fingerprint_dialog(username, finger)
 
     def distrust_selected_user(self):
-        item = self.users_tree.focus()
-        if not item:
+        username = self.selected_user
+        if not username:
             return
-        username = self.users_tree.item(item, 'values')[0]
         self.client.distrust_user(username)
-        self._update_user_list([self.users_tree.item(i, 'values')[0] for i in self.users_tree.get_children()])
+        self._update_user_list(self._displayed_users)
 
     def copy_fingerprint(self):
-        item = self.users_tree.focus()
-        if not item:
+        username = self.selected_user
+        if not username:
             return
-        username = self.users_tree.item(item, 'values')[0]
         finger = self.client.get_user_fingerprint(username)
         if finger:
             self.root.clipboard_clear()
@@ -1272,16 +1561,61 @@ class ChatGUI:
     # ------------------------------------------------------------------
     # 指纹对话框
     def _show_server_fingerprint_dialog(self, endpoint, fingerprint):
-        dlg = tk.Toplevel(self.root)
+        """显示服务器指纹对话框，支持单词显示和完整十六进制指纹"""
+        dlg = ctk.CTkToplevel(self.root)
         dlg.title("服务器公钥验证")
         dlg.transient(self.root)
         dlg.grab_set()
         dlg.attributes('-topmost', True)
-        dlg.geometry("600x300")
-        dlg.resizable(False, False)
+        dlg.geometry("700x430")
+        dlg.resizable(True, True)
 
-        ttk.Label(dlg, text=f"首次连接 {endpoint}，请核对服务器指纹:", wraplength=550).pack(pady=10)
-        ttk.Label(dlg, text=fingerprint, font=("Courier", 10), background="#f0f0f0").pack(pady=10)
+        # 标题
+        ctk.CTkLabel(dlg, text=f"首次连接 {endpoint}，请核对服务器指纹:", wraplength=600, font=("", 11, "bold")).pack(pady=10)
+
+        # 获取指纹单词
+        from crypto_utils import FingerprintWords
+        try:
+            words = FingerprintWords.fingerprint_to_words(fingerprint, 6)
+            words_str = "  ".join(words).upper()
+        except Exception:
+            words = None
+            words_str = "（无法生成单词）"
+
+        # 单词显示区域
+        word_frame = ctk.CTkFrame(dlg)
+        word_frame.pack(pady=15, padx=20, fill=tk.X)
+        ctk.CTkLabel(word_frame, text="指纹单词（6个）:", font=("", 10, "bold")).pack(anchor="w", pady=(0, 8))
+        ctk.CTkLabel(word_frame, text=words_str, font=("", 16, "bold"), text_color=("#0066ff", "#6699ff")).pack(anchor="w", pady=10, padx=10)
+
+        # 安全提示
+        ctk.CTkLabel(dlg, text="请通过其他安全渠道（电话、当面）核对以上单词，以确认对方身份。", wraplength=600, text_color=("orange", "orange"), font=("", 9)).pack(pady=5)
+
+        # 完整指纹显示框（初始隐藏）
+        detail_frame = ctk.CTkFrame(dlg)
+        detail_frame.pack(pady=10, padx=20, fill=tk.BOTH, expand=False)
+        detail_title = ctk.CTkLabel(detail_frame, text="完整指纹 (SHA-256):", font=("", 9, "bold"))
+        details_entry = tk.Entry(detail_frame, font=("Courier", 10), relief="flat", state="readonly")
+        details_entry.configure(readonlybackground="#f0f0f0", fg="#333333", insertbackground="#333333")
+        details_visible = [False]
+
+        def toggle_details():
+            if details_visible[0]:
+                detail_title.pack_forget()
+                details_entry.pack_forget()
+                btn_details.configure(text="▼ 高级：查看完整指纹")
+                details_visible[0] = False
+                self.center_dialog(dlg)
+            else:
+                detail_title.pack(anchor="w", pady=(10, 5), padx=10)
+                details_entry.configure(state="normal")
+                details_entry.delete(0, tk.END)
+                details_entry.insert(0, fingerprint)
+                details_entry.configure(state="readonly")
+                details_entry.pack(anchor="w", pady=5, padx=10, fill=tk.X)
+                btn_details.configure(text="▲ 隐藏完整指纹")
+                details_visible[0] = True
+                self.center_dialog(dlg)
 
         result = [False]
 
@@ -1292,26 +1626,78 @@ class ChatGUI:
         def reject():
             dlg.destroy()
 
-        btn_frame = ttk.Frame(dlg)
-        btn_frame.pack(pady=10)
-        ttk.Button(btn_frame, text="信任", command=approve, width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="拒绝", command=reject, width=10).pack(side=tk.LEFT, padx=5)
+        # 高级按钮
+        btn_details = ctk.CTkButton(detail_frame, text="▼ 高级：查看完整指纹", command=toggle_details, width=200, corner_radius=6, font=("", 9))
+        btn_details.pack(pady=10, padx=10, anchor="w")
+
+        # 按钮框
+        btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
+        btn_frame.pack(pady=15)
+        ctk.CTkButton(btn_frame, text="信任", command=approve, width=100, corner_radius=8).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(btn_frame, text="拒绝", command=reject, width=100, corner_radius=8).pack(side=tk.LEFT, padx=5)
+        
         dlg.bind('<Escape>', lambda e: reject())
         self.center_dialog(dlg)
         self.root.wait_window(dlg)
         return result[0]
 
     def _show_user_fingerprint_dialog(self, username, fingerprint):
-        dlg = tk.Toplevel(self.root)
+        """显示用户指纹对话框，支持单词显示和完整十六进制指纹"""
+        dlg = ctk.CTkToplevel(self.root)
         dlg.title("用户公钥验证")
         dlg.transient(self.root)
         dlg.grab_set()
         dlg.attributes('-topmost', True)
-        dlg.geometry("600x300")
-        dlg.resizable(False, False)
+        dlg.geometry("700x430")
+        dlg.resizable(True, True)
 
-        ttk.Label(dlg, text=f"请与 {username} 核对以下指纹以确认身份:", wraplength=550).pack(pady=10)
-        ttk.Label(dlg, text=fingerprint, font=("Courier", 10), background="#f0f0f0").pack(pady=10)
+        # 标题
+        ctk.CTkLabel(dlg, text=f"请与 {username} 核对以下指纹以确认身份:", wraplength=600, font=("", 11, "bold")).pack(pady=10)
+
+        # 获取指纹单词
+        from crypto_utils import FingerprintWords
+        try:
+            words = FingerprintWords.fingerprint_to_words(fingerprint, 6)
+            words_str = "  ".join(words).upper()
+        except Exception:
+            words = None
+            words_str = "（无法生成单词）"
+
+        # 单词显示区域
+        word_frame = ctk.CTkFrame(dlg)
+        word_frame.pack(pady=15, padx=20, fill=tk.X)
+        ctk.CTkLabel(word_frame, text="指纹单词（6个）:", font=("", 10, "bold")).pack(anchor="w", pady=(0, 8))
+        ctk.CTkLabel(word_frame, text=words_str, font=("", 16, "bold"), text_color=("#0066ff", "#6699ff")).pack(anchor="w", pady=10, padx=10)
+
+        # 安全提示
+        ctk.CTkLabel(dlg, text="请通过其他安全渠道（电话、当面）核对以上单词，以确认对方身份。", wraplength=600, text_color=("orange", "orange"), font=("", 9)).pack(pady=5)
+
+        # 完整指纹显示框（初始隐藏）
+        detail_frame = ctk.CTkFrame(dlg)
+        detail_frame.pack(pady=10, padx=20, fill=tk.BOTH, expand=False)
+        detail_title = ctk.CTkLabel(detail_frame, text="完整指纹 (SHA-256):", font=("", 9, "bold"))
+        details_entry = tk.Entry(detail_frame, font=("Courier", 10), relief="flat", state="readonly")
+        details_entry.configure(readonlybackground="#f0f0f0", fg="#333333", insertbackground="#333333")
+        details_visible = [False]
+
+        def toggle_details():
+            if details_visible[0]:
+                detail_title.pack_forget()
+                details_entry.pack_forget()
+                btn_details.configure(text="▼ 高级：查看完整指纹")
+                details_visible[0] = False
+                self.center_dialog(dlg)
+            else:
+                detail_title.pack(anchor="w", pady=(10, 5), padx=10)
+                details_entry.configure(state="normal")
+                details_entry.delete(0, tk.END)
+                details_entry.insert(0, fingerprint)
+                details_entry.configure(state="readonly")
+                details_entry.pack(anchor="w", pady=5, padx=10, fill=tk.X)
+                btn_details.configure(text="▲ 隐藏完整指纹")
+                details_visible[0] = True
+                self.center_dialog(dlg)
+
         result = [False]
 
         def verify():
@@ -1321,14 +1707,109 @@ class ChatGUI:
         def cancel():
             dlg.destroy()
 
-        btn_frame = ttk.Frame(dlg)
-        btn_frame.pack(pady=10)
-        ttk.Button(btn_frame, text="验证通过", command=verify, width=12).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="取消", command=cancel, width=12).pack(side=tk.LEFT, padx=5)
+        # 高级按钮
+        btn_details = ctk.CTkButton(detail_frame, text="▼ 高级：查看完整指纹", command=toggle_details, width=200, corner_radius=6, font=("", 9))
+        btn_details.pack(pady=10, padx=10, anchor="w")
+
+        # 按钮框
+        btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
+        btn_frame.pack(pady=15)
+        ctk.CTkButton(btn_frame, text="验证通过", command=verify, width=120, corner_radius=8).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(btn_frame, text="取消", command=cancel, width=120, corner_radius=8).pack(side=tk.LEFT, padx=5)
+        
         dlg.bind('<Escape>', lambda e: cancel())
         self.center_dialog(dlg)
         self.root.wait_window(dlg)
         return result[0]
+
+    def _show_own_fingerprint_dialog(self, title="我的指纹单词", display_name=None):
+        """显示用户自己的指纹单词对话框，用于用户分享给他人核对"""
+        if not self.client.id_pub:
+            self._dialog_showerror("错误", "身份信息未就绪")
+            return
+        
+        words = self.client.get_own_fingerprint_words(6)
+        fingerprint = self.client._fingerprint_from_bytes(
+            IdentityKeyManager.serialize_public_key(self.client.id_pub)
+        )
+        
+        if not words:
+            self._dialog_showerror("错误", "无法生成指纹单词")
+            return
+
+        dlg = ctk.CTkToplevel(self.root)
+        dlg.title(title)
+        dlg.transient(self.root)
+        dlg.grab_set()
+        dlg.attributes('-topmost', True)
+        dlg.geometry("700x390")
+        dlg.resizable(True, True)
+
+        display_name = display_name or self.client.username or "当前账号"
+
+        # 标题
+        ctk.CTkLabel(dlg, text=f"您的身份指纹单词（{display_name}):", wraplength=600, font=("", 11, "bold")).pack(pady=10)
+
+        # 单词显示区域
+        word_frame = ctk.CTkFrame(dlg)
+        word_frame.pack(pady=15, padx=20, fill=tk.X)
+        ctk.CTkLabel(word_frame, text="指纹单词（6个）:", font=("", 10, "bold")).pack(anchor="w", pady=(0, 8))
+        words_str = "  ".join(words).upper()
+        ctk.CTkLabel(word_frame, text=words_str, font=("", 16, "bold"), text_color=("#0066ff", "#6699ff")).pack(anchor="w", pady=10, padx=10)
+
+        # 安全提示
+        ctk.CTkLabel(dlg, text="您可以将这些单词告诉他人，对方通过核对这些单词来确认您的身份。", wraplength=600, text_color=("orange", "orange"), font=("", 9)).pack(pady=5)
+        ctk.CTkLabel(dlg, text="请通过其他安全渠道（电话、当面）分享这些单词。", wraplength=600, text_color=("orange", "orange"), font=("", 9)).pack(pady=(0, 10))
+
+        # 完整指纹显示框（初始隐藏）
+        detail_frame = ctk.CTkFrame(dlg)
+        detail_frame.pack(pady=10, padx=20, fill=tk.BOTH, expand=False)
+        detail_title = ctk.CTkLabel(detail_frame, text="完整指纹 (SHA-256):", font=("", 9, "bold"))
+        details_entry = tk.Entry(detail_frame, font=("Courier", 10), relief="flat", state="readonly")
+        details_entry.configure(readonlybackground="#f0f0f0", fg="#333333", insertbackground="#333333")
+        details_visible = [False]
+
+        def toggle_details():
+            if details_visible[0]:
+                detail_title.pack_forget()
+                details_entry.pack_forget()
+                btn_details.configure(text="▼ 高级：查看完整指纹")
+                details_visible[0] = False
+                self.center_dialog(dlg)
+            else:
+                detail_title.pack(anchor="w", pady=(10, 5), padx=10)
+                details_entry.configure(state="normal")
+                details_entry.delete(0, tk.END)
+                details_entry.insert(0, fingerprint)
+                details_entry.configure(state="readonly")
+                details_entry.pack(anchor="w", pady=5, padx=10, fill=tk.X)
+                btn_details.configure(text="▲ 隐藏完整指纹")
+                details_visible[0] = True
+                self.center_dialog(dlg)
+
+        # 高级按钮
+        btn_details = ctk.CTkButton(detail_frame, text="▼ 高级：查看完整指纹", command=toggle_details, width=200, corner_radius=6, font=("", 9))
+        btn_details.pack(pady=10, padx=10, anchor="w")
+
+        # 按钮框
+        btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
+        btn_frame.pack(pady=15)
+        ctk.CTkButton(btn_frame, text="确认", command=dlg.destroy, width=100, corner_radius=8).pack(side=tk.LEFT, padx=5)
+        
+        dlg.bind('<Escape>', lambda e: dlg.destroy())
+        self.center_dialog(dlg)
+        self.root.wait_window(dlg)
+
+    def _show_own_fingerprint_after_register(self, username=None):
+        """在注册完成后显示用户的指纹单词"""
+        self._show_own_fingerprint_dialog("我的指纹单词 - 请妥善保管", display_name=username)
+
+    def _on_user_label_click(self, event):
+        """处理点击用户名标签事件，显示用户自己的指纹单词"""
+        if self.client.id_pub:
+            self._show_own_fingerprint_dialog(display_name=self.client.username)
+        else:
+            self._dialog_showinfo("提示", "身份信息未就绪")
 
     # ------------------------------------------------------------------
     # 托盘与退出
@@ -1371,6 +1852,7 @@ class ChatGUI:
 
     def _quit_application(self):
         self.is_exiting = True
+        self._close_context_menu()
         if self.tray_icon:
             self.tray_icon.stop()
         self.client.logout()
