@@ -5,6 +5,8 @@
 
 **Secure end-to-end encrypted chat software**
 
+🔗 **项目官网**: [https://kaleidotalk.hanbangze.tech](https://kaleidotalk.hanbangze.tech)
+
 KaleidoTalk 是一款端到端加密聊天软件，采用 Ed25519 身份密钥和 X25519 密钥交换协议，确保通信内容仅限通信双方读取。
 
 ## ✨ 功能特性
