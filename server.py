@@ -23,6 +23,7 @@ import re
 import secrets
 import logging
 from datetime import datetime
+from datetime import timezone
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -184,8 +185,8 @@ def _canonical_json(data):
     return json.dumps(data or {}, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
 
 
-def _auth_message(session_id, timestamp, data):
-    return f'{session_id}{timestamp}{_canonical_json(data)}'.encode('utf-8')
+def _auth_message(session_id, seq, timestamp, data):
+    return f'{session_id}{seq}{timestamp}{_canonical_json(data)}'.encode('utf-8')
 
 
 def _encrypt_session_key_for_client(session_key, client_x25519_pub_pem):
@@ -195,14 +196,13 @@ def _encrypt_session_key_for_client(session_key, client_x25519_pub_pem):
     shared_secret = eph_priv.exchange(client_pub)
     hkdf = HKDF(
         algorithm=hashes.SHA256(),
-        length=32 + 12,
+        length=32,
         salt=None,
         info=b'kaleidotalk-session-key',
         backend=default_backend(),
     )
-    key_material = hkdf.derive(shared_secret)
-    aes_key = key_material[:32]
-    nonce = key_material[32:44]
+    aes_key = hkdf.derive(shared_secret)
+    nonce = os.urandom(12)
     cipher = Cipher(algorithms.AES(aes_key), modes.GCM(nonce), backend=default_backend())
     encryptor = cipher.encryptor()
     ciphertext = encryptor.update(session_key) + encryptor.finalize()
@@ -213,6 +213,7 @@ def _encrypt_session_key_for_client(session_key, client_x25519_pub_pem):
         )).decode('utf-8'),
         'ct': base64.b64encode(ciphertext).decode('utf-8'),
         'tag': base64.b64encode(encryptor.tag).decode('utf-8'),
+        'nonce': base64.b64encode(nonce).decode('utf-8'),
     }
 
 
@@ -223,6 +224,7 @@ def _create_session(username, client_x25519_pub_pem):
         sessions[session_id] = {
             'username': username,
             'session_key': session_key,
+            'last_seq': 0,
             'timestamps': {},
             'client_x25519_pub': client_x25519_pub_pem,
         }
@@ -236,12 +238,18 @@ def _remove_session(session_id):
 
 def _verify_authenticated_request(payload):
     session_id = payload.get('session_id', '')
+    seq_raw = payload.get('seq')
     timestamp_raw = payload.get('timestamp')
     provided_hmac = payload.get('hmac', '')
     data = payload.get('data', {})
 
     if not session_id or not isinstance(data, dict):
         return False, '缺少会话或请求数据', None, None
+
+    try:
+        seq = int(seq_raw)
+    except Exception:
+        return False, '序号无效', None, None
 
     try:
         timestamp = int(timestamp_raw)
@@ -257,14 +265,17 @@ def _verify_authenticated_request(payload):
         if not session:
             return False, '会话已失效', None, None
         session_key = session['session_key']
+        last_seq = int(session.get('last_seq', 0))
         timestamp_cache = session.setdefault('timestamps', {})
         stale = [ts for ts, seen_at in timestamp_cache.items() if now_ms - seen_at > SESSION_TIME_WINDOW_MS]
         for ts in stale:
             timestamp_cache.pop(ts, None)
         if timestamp in timestamp_cache:
             return False, '重放请求', None, None
+        if seq <= last_seq:
+            return False, '重放请求', None, None
 
-    expected = hmac.new(session_key, _auth_message(session_id, timestamp, data), hashlib.sha256).hexdigest()
+    expected = hmac.new(session_key, _auth_message(session_id, seq, timestamp, data), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, str(provided_hmac)):
         return False, 'HMAC 校验失败', None, None
 
@@ -275,7 +286,10 @@ def _verify_authenticated_request(payload):
         timestamp_cache = session.setdefault('timestamps', {})
         if timestamp in timestamp_cache:
             return False, '重放请求', None, None
+        if seq <= int(session.get('last_seq', 0)):
+            return False, '重放请求', None, None
         timestamp_cache[timestamp] = now_ms
+        session['last_seq'] = seq
         username = session['username']
 
     return True, username, session_id, data
@@ -296,7 +310,7 @@ def is_password_strong(password):
 def require_invite_code():
     return load_invites()['require_invite']
 
-def verify_and_consume_invite(code_str):
+def verify_invite(code_str):
     if not require_invite_code():
         return True, 'invite_not_required'
     code_str = (code_str or '').strip()
@@ -306,6 +320,21 @@ def verify_and_consume_invite(code_str):
     if code_str not in invites['codes']:
         return False, 'invalid_invite_code'
     item = invites['codes'][code_str]
+    if item['remaining'] <= 0:
+        return False, 'invite_code_exhausted'
+    return True, 'invite_valid'
+
+
+def consume_invite(code_str):
+    if not require_invite_code():
+        return True, 'invite_not_required'
+    code_str = (code_str or '').strip()
+    if not code_str:
+        return False, 'invite_required'
+    invites = load_invites()
+    item = invites['codes'].get(code_str)
+    if not item:
+        return False, 'invalid_invite_code'
     if item['remaining'] <= 0:
         return False, 'invite_code_exhausted'
     item['remaining'] -= 1
@@ -489,9 +518,9 @@ def handle_message(sock, addr, payload):
             password_hash = None
             password = None
 
-        # 邀请码
+        # 邀请码先校验，最终提交前再扣减
         invite_code = reg_data.get('invite_code', '')
-        inv_ok, inv_msg = verify_and_consume_invite(invite_code)
+        inv_ok, inv_msg = verify_invite(invite_code)
         if not inv_ok:
             send_msg(sock, {'status': 'error', 'error': inv_msg})
             return
@@ -529,6 +558,19 @@ def handle_message(sock, addr, payload):
             key_data['encrypted_private'] = enc_priv
         user_keys[username] = key_data
         save_user_keys(user_keys)
+
+        try:
+            inv_ok, inv_msg = consume_invite(invite_code)
+        except Exception as e:
+            inv_ok = False
+            inv_msg = f'invite_save_failed: {e}'
+        if not inv_ok:
+            users.pop(username, None)
+            save_users(users)
+            user_keys.pop(username, None)
+            save_user_keys(user_keys)
+            send_msg(sock, {'status': 'error', 'error': inv_msg})
+            return
 
         send_msg(sock, {'status': 'ok', 'cmd': 'reg_user', 'data': {'message': '注册成功'}})
         logger.info(f"注册成功: {username} (store_key={store_private_key})")
@@ -774,7 +816,7 @@ def handle_client(sock, addr):
             'type': 'welcome',
             'data': {
                 'message': '欢迎使用KaleidoTalk V2.2',
-                'server_time': datetime.now().isoformat()
+                'server_time': datetime.now(timezone.utc).isoformat()
             }
         })
     except Exception:
