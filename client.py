@@ -27,7 +27,7 @@ import secrets
 import ctypes
 from datetime import datetime
 import customtkinter as ctk
-from network import send_msg, recv_msg
+from network import send_msg, recv_msg, set_socket_time_offset, get_socket_time_offset
 from crypto_utils import (
     IdentityKeyManager,
     ExchangeKeyManager,
@@ -82,7 +82,7 @@ class ChatClient:
         self.session_id = None
         self.session_key = None
         self.token = None
-        self._last_auth_timestamp = 0
+        self._auth_sequence = 0
 
         # 身份密钥 (Ed25519)
         self.id_priv = None
@@ -111,6 +111,8 @@ class ChatClient:
         self.pending_outgoing_lock = threading.Lock()
         self.pending_verifications = set()
         self.pending_verifications_lock = threading.Lock()
+        self.pending_manual_verifications = set()
+        self.pending_manual_verifications_lock = threading.Lock()
 
         # 注册/登录临时状态
         self.last_password = None
@@ -207,15 +209,15 @@ class ChatClient:
         if not self.session_id or not self.session_key:
             raise ValueError('会话未建立')
         payload_data = data or {}
-        timestamp = int(time.time() * 1000)
-        if timestamp <= self._last_auth_timestamp:
-            timestamp = self._last_auth_timestamp + 1
-        self._last_auth_timestamp = timestamp
-        message = f'{self.session_id}{timestamp}{self._canonical_json(payload_data)}'.encode('utf-8')
+        self._auth_sequence += 1
+        seq = self._auth_sequence
+        timestamp = int(time.time() * 1000) + get_socket_time_offset(self.sock)
+        message = f'{self.session_id}{seq}{timestamp}{self._canonical_json(payload_data)}'.encode('utf-8')
         signature = hmac.new(self.session_key, message, hashlib.sha256).hexdigest()
         return {
             'cmd': cmd,
             'session_id': self.session_id,
+            'seq': seq,
             'timestamp': timestamp,
             'hmac': signature,
             'data': payload_data,
@@ -266,6 +268,14 @@ class ChatClient:
             # 接收欢迎信息
             msg = recv_msg(self.sock)
             if msg and msg.get('type') == 'welcome':
+                server_time_text = msg['data'].get('server_time')
+                try:
+                    server_time = datetime.fromisoformat(server_time_text.replace('Z', '+00:00'))
+                    local_time = datetime.now(server_time.tzinfo) if server_time.tzinfo else datetime.now()
+                    offset_ms = int((server_time.timestamp() - local_time.timestamp()) * 1000)
+                    set_socket_time_offset(self.sock, offset_ms)
+                except Exception:
+                    pass
                 if self.callback:
                     self.callback('SYS', msg['data']['message'])
 
@@ -351,6 +361,9 @@ class ChatClient:
                 target = data.get('username')
                 if target:
                     self._clear_pending_outgoing_messages(target)
+                    with self.pending_manual_verifications_lock:
+                        self.pending_manual_verifications.discard(target)
+                    self._end_verification(target)
             if self.callback:
                 self.callback('ERROR', msg.get('error') or data.get('error', '未知错误'))
             return
@@ -467,6 +480,7 @@ class ChatClient:
             x_pub = ExchangeKeyManager.deserialize_public_key(data['x25519_pub'])
             self.user_pubkeys[username] = {'ed25519': ed_pub, 'x25519': x_pub}
             # 收到公钥后，先处理对该用户的发送前验证，再处理待发消息
+            self._check_manual_verification(username)
             self._check_pending_outgoing_verification(username)
             self._check_pending_verification(username)
 
@@ -548,6 +562,9 @@ class ChatClient:
         }))
 
     def _check_pending_verification(self, username):
+        with self.pending_manual_verifications_lock:
+            if username in self.pending_manual_verifications:
+                return
         with self.pending_msg_lock:
             has_pending = username in self.pending_messages and bool(self.pending_messages[username])
 
@@ -568,6 +585,9 @@ class ChatClient:
             self.callback('USER_VERIFY', {'username': username, 'fingerprint': finger})
 
     def _check_pending_outgoing_verification(self, username):
+        with self.pending_manual_verifications_lock:
+            if username in self.pending_manual_verifications:
+                return
         with self.pending_outgoing_lock:
             has_pending = username in self.pending_outgoing_messages and bool(self.pending_outgoing_messages[username])
 
@@ -676,6 +696,21 @@ class ChatClient:
     def _end_verification(self, username):
         with self.pending_verifications_lock:
             self.pending_verifications.discard(username)
+
+    def _check_manual_verification(self, username):
+        with self.pending_manual_verifications_lock:
+            if username not in self.pending_manual_verifications:
+                return
+            self.pending_manual_verifications.discard(username)
+
+        if username not in self.user_pubkeys:
+            return
+
+        finger = self._fingerprint_from_bytes(
+            IdentityKeyManager.serialize_public_key(self.user_pubkeys[username]['ed25519'])
+        )
+        if self.callback:
+            self.callback('USER_VERIFY', {'username': username, 'fingerprint': finger})
 
     # ------------------------------------------------------------------
     # 服务器信任
@@ -876,7 +911,7 @@ class ChatClient:
         """仅清理登录态，不断开与服务器的连接。"""
         self.session_id = None
         self.session_key = None
-        self._last_auth_timestamp = 0
+        self._auth_sequence = 0
         self.token = None
         self.username = None
         self.pending_login_user = None
@@ -892,6 +927,8 @@ class ChatClient:
             self.pending_outgoing_messages.clear()
         with self.pending_verifications_lock:
             self.pending_verifications.clear()
+        with self.pending_manual_verifications_lock:
+            self.pending_manual_verifications.clear()
         self.clear_password()
 
     def _disconnect_cleanup(self):
@@ -956,6 +993,7 @@ class ChatGUI:
         self._pending_register = None
 
         self.is_minimized_to_tray = False
+        self._tray_minimize_pending = False
         self.tray_icon = None
         self.is_exiting = False
         self._context_menu = None
@@ -1553,6 +1591,25 @@ class ChatGUI:
         finger = self.client.get_user_fingerprint(username)
         if finger:
             self._show_user_fingerprint_dialog(username, finger)
+            return
+
+        with self.client.pending_manual_verifications_lock:
+            if username in self.client.pending_manual_verifications:
+                return
+            self.client.pending_manual_verifications.add(username)
+        self.append_chat("系统", f"正在获取 {username} 的公钥用于验证指纹...")
+        self.client._request_public_key(username)
+
+    def _check_manual_verification(self, username):
+        with self.client.pending_manual_verifications_lock:
+            if username not in self.client.pending_manual_verifications:
+                return
+            self.client.pending_manual_verifications.discard(username)
+        if username != self.selected_user:
+            return
+        finger = self.client.get_user_fingerprint(username)
+        if finger:
+            self._show_user_fingerprint_dialog(username, finger)
 
     def distrust_selected_user(self):
         username = self.selected_user
@@ -1827,15 +1884,20 @@ class ChatGUI:
     # ------------------------------------------------------------------
     # 托盘与退出
     def on_closing(self):
-        self.minimize_to_tray()
+        self._quit_application()
 
     def on_window_unmap(self, event):
-        if not self.is_exiting and not self.is_minimized_to_tray and self.root.state() == 'iconic':
+        if (not self.is_exiting and not self.is_minimized_to_tray and not self._tray_minimize_pending
+                and self.root.state() == 'iconic'):
+            self._tray_minimize_pending = True
             self.root.after(0, self.minimize_to_tray)
 
     def minimize_to_tray(self):
+        self._tray_minimize_pending = False
         if pystray is None:
             self._quit_application()
+            return
+        if self.is_minimized_to_tray or self.tray_icon:
             return
         self.root.withdraw()
         self.is_minimized_to_tray = True
@@ -1851,6 +1913,7 @@ class ChatGUI:
         threading.Thread(target=self.tray_icon.run, daemon=True).start()
 
     def restore_from_tray(self):
+        self._tray_minimize_pending = False
         self.is_minimized_to_tray = False
         self.root.deiconify()
         self.root.lift()
@@ -1865,9 +1928,11 @@ class ChatGUI:
 
     def _quit_application(self):
         self.is_exiting = True
+        self._tray_minimize_pending = False
         self._close_context_menu()
         if self.tray_icon:
             self.tray_icon.stop()
+            self.tray_icon = None
         self.client.logout()
         # 在销毁窗口前更新按钮状态，确保 UI 状态已清理
         try:

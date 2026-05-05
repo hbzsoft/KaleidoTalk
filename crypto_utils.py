@@ -1,5 +1,4 @@
 # Copyright (C) 2026 Bangze Han
-# -*- coding: gbk -*-
 
 # This file is part of KaleidoTalk.
 
@@ -133,7 +132,7 @@ jZObgtNFzfDjHOWDvnkKWdOHjTHGZEX2+OTGYwP+RaV94dc32O59c+fHIztSf0FSJCz55dTan+zP/5bS
 28E8MwAA"""
 
 class IdentityKeyManager:
-    """Ed25519 Éí·İÃÜÔ¿¹ÜÀí"""
+    """Ed25519 èº«ä»½å¯†é’¥ç®¡ç†"""
     @staticmethod
     def generate():
         private_key = ed25519.Ed25519PrivateKey.generate()
@@ -187,7 +186,7 @@ class IdentityKeyManager:
             return False
 
 class ExchangeKeyManager:
-    """X25519 ÃÜÔ¿½»»»ÃÜÔ¿¹ÜÀí"""
+    """X25519 å¯†é’¥äº¤æ¢å¯†é’¥ç®¡ç†"""
     @staticmethod
     def generate():
         private_key = x25519.X25519PrivateKey.generate()
@@ -222,7 +221,7 @@ class ExchangeKeyManager:
         return private_key.exchange(peer_public_key)
 
 class PasswordManager:
-    """ÃÜÂë¹şÏ£ÓëÑéÖ¤"""
+    """å¯†ç å“ˆå¸Œä¸éªŒè¯"""
     SALT_LENGTH = 16
     KEY_LENGTH = 32
     ITERATIONS = 600_000
@@ -246,7 +245,7 @@ class PasswordManager:
     def hash_password(password):
         salt = PasswordManager.generate_salt()
         derived = PasswordManager.derive_key(password, salt)
-        # ´æ´¢¸ñÊ½£ºPBKDF2$<hex(salt)>$<hex(derived)>
+        # å­˜å‚¨æ ¼å¼ï¼šPBKDF2$<hex(salt)>$<hex(derived)>
         return f"PBKDF2${salt.hex()}${derived.hex()}"
 
     @staticmethod
@@ -263,13 +262,13 @@ class PasswordManager:
             return False
 
 class MessageEncryptorV2:
-    """´øÇ©ÃûµÄ X25519 ECDH + AES-256-GCM ¼ÓÃÜ"""
+    """å¸¦ç­¾åçš„ X25519 ECDH + AES-256-GCM åŠ å¯†"""
     @staticmethod
     def encrypt(plaintext: str, recipient_x25519_pub, sender_identity_priv):
         """
-        ·µ»Ø JSON ×Ö·û´® (base64 encoded fields)
+        è¿”å› JSON å­—ç¬¦ä¸² (base64 encoded fields)
         """
-        # Éú³ÉÁÙÊ± X25519 ÃÜÔ¿¶Ô
+        # ç”Ÿæˆä¸´æ—¶ X25519 å¯†é’¥å¯¹
         eph_priv = x25519.X25519PrivateKey.generate()
         eph_pub = eph_priv.public_key()
         # ECDH
@@ -277,27 +276,27 @@ class MessageEncryptorV2:
         # HKDF
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
-            length=32 + 12,  # key(32) + nonce(12)
+            length=32,
             salt=None,
             info=b'kaleido-msg',
             backend=default_backend()
         )
-        key_material = hkdf.derive(shared_secret)
-        aes_key = key_material[:32]
-        nonce = key_material[32:44]
-        # GCM ¼ÓÃÜ
+        aes_key = hkdf.derive(shared_secret)
+        nonce = os.urandom(12)
+        # GCM åŠ å¯†
         cipher = Cipher(algorithms.AES(aes_key), modes.GCM(nonce), backend=default_backend())
         encryptor = cipher.encryptor()
         ciphertext = encryptor.update(plaintext.encode('utf-8')) + encryptor.finalize()
         tag = encryptor.tag
-        # Ç©Ãû (eph_pub || ciphertext || tag)
+        # ç­¾å (eph_pub || ciphertext || tag)
         signed_data = eph_pub.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw) + ciphertext + tag
         signature = sender_identity_priv.sign(signed_data)
-        # ×é×°
+        # ç»„è£…
         packet = {
             'eph_pub': base64.b64encode(eph_pub.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)).decode(),
             'ct': base64.b64encode(ciphertext).decode(),
             'tag': base64.b64encode(tag).decode(),
+            'nonce': base64.b64encode(nonce).decode(),
             'sig': base64.b64encode(signature).decode(),
         }
         return json.dumps(packet)
@@ -305,7 +304,7 @@ class MessageEncryptorV2:
     @staticmethod
     def decrypt(encrypted_json_str, recipient_x25519_priv, sender_identity_pub):
         """
-        ·µ»Ø (plaintext_or_None, error_string)
+        è¿”å› (plaintext_or_None, error_string)
         """
         try:
             p = json.loads(encrypted_json_str)
@@ -313,33 +312,45 @@ class MessageEncryptorV2:
             eph_pub = x25519.X25519PublicKey.from_public_bytes(eph_pub_bytes)
             ct = base64.b64decode(p['ct'])
             tag = base64.b64decode(p['tag'])
+            nonce_b64 = p.get('nonce')
             sig = base64.b64decode(p['sig'])
-            # ÑéÖ¤Ç©Ãû
+            # éªŒè¯ç­¾å
             signed_data = eph_pub_bytes + ct + tag
-            sender_identity_pub.verify(sig, signed_data)  # ÈôÎŞĞ§»áÅ×³öÒì³£
+            sender_identity_pub.verify(sig, signed_data)  # è‹¥æ— æ•ˆä¼šæŠ›å‡ºå¼‚å¸¸
             # ECDH
             shared_secret = recipient_x25519_priv.exchange(eph_pub)
             hkdf = HKDF(
                 algorithm=hashes.SHA256(),
-                length=32 + 12,
+                length=32,
                 salt=None,
                 info=b'kaleido-msg',
                 backend=default_backend()
             )
-            key_material = hkdf.derive(shared_secret)
-            aes_key = key_material[:32]
-            nonce = key_material[32:44]
+            aes_key = hkdf.derive(shared_secret)
+            if nonce_b64:
+                nonce = base64.b64decode(nonce_b64)
+            else:
+                # å…¼å®¹æ—§æ ¼å¼ï¼šå†å²ç‰ˆæœ¬æœªä¼ è¾“ nonceï¼Œä½¿ç”¨æ—§æ´¾ç”Ÿæ–¹å¼ã€‚
+                hkdf_legacy = HKDF(
+                    algorithm=hashes.SHA256(),
+                    length=32 + 12,
+                    salt=None,
+                    info=b'kaleido-msg',
+                    backend=default_backend()
+                )
+                legacy_km = hkdf_legacy.derive(shared_secret)
+                nonce = legacy_km[32:44]
             cipher = Cipher(algorithms.AES(aes_key), modes.GCM(nonce, tag), backend=default_backend())
             decryptor = cipher.decryptor()
             plain = decryptor.update(ct) + decryptor.finalize()
             return plain.decode('utf-8'), None
         except InvalidSignature:
-            return None, "Ç©ÃûÑéÖ¤Ê§°Ü"
+            return None, "ç­¾åéªŒè¯å¤±è´¥"
         except Exception as e:
-            return None, f"½âÃÜÊ§°Ü: {str(e)}"
+            return None, f"è§£å¯†å¤±è´¥: {str(e)}"
 
 class ServerCrypto:
-    """·şÎñÆ÷ÃÜÔ¿¹ÜÀíÓë¿Í»§¶Ë-·şÎñÆ÷ÃÜÂë´«Êä¼ÓÃÜ"""
+    """æœåŠ¡å™¨å¯†é’¥ç®¡ç†ä¸å®¢æˆ·ç«¯-æœåŠ¡å™¨å¯†ç ä¼ è¾“åŠ å¯†"""
     _ed25519_priv = None
     _ed25519_pub = None
     _x25519_priv = None
@@ -349,11 +360,11 @@ class ServerCrypto:
 
     @classmethod
     def initialize(cls, admin_password):
-        """¼ÓÔØ»òÉú³É·şÎñÆ÷ÃÜÔ¿¡£ÈôÃÜÂë´íÎó½«Å×Òì³£¡£"""
+        """åŠ è½½æˆ–ç”ŸæˆæœåŠ¡å™¨å¯†é’¥ã€‚è‹¥å¯†ç é”™è¯¯å°†æŠ›å¼‚å¸¸ã€‚"""
         if not os.path.exists(cls._key_dir):
             os.makedirs(cls._key_dir)
         if os.path.exists(cls._encrypted_file):
-            # ½âÃÜ
+            # è§£å¯†
             with open(cls._encrypted_file, 'rb') as f:
                 data = f.read()
             salt = data[:16]
@@ -365,14 +376,14 @@ class ServerCrypto:
             try:
                 plain = decryptor.update(ciphertext[:-16]) + decryptor.finalize()
             except Exception:
-                raise ValueError("¹ÜÀíÃÜÂë´íÎó»òÃÜÔ¿ÎÄ¼şËğ»µ")
+                raise ValueError("ç®¡ç†å¯†ç é”™è¯¯æˆ–å¯†é’¥æ–‡ä»¶æŸå")
             keys = json.loads(plain.decode('utf-8'))
             cls._ed25519_priv = IdentityKeyManager.deserialize_private_key(keys['ed25519_priv'])
             cls._ed25519_pub = cls._ed25519_priv.public_key()
             cls._x25519_priv = ExchangeKeyManager.deserialize_private_key(keys['x25519_priv'])
             cls._x25519_pub = cls._x25519_priv.public_key()
         else:
-            # Éú³ÉĞÂÃÜÔ¿²¢¼ÓÃÜ±£´æ
+            # ç”Ÿæˆæ–°å¯†é’¥å¹¶åŠ å¯†ä¿å­˜
             cls._ed25519_priv, cls._ed25519_pub = IdentityKeyManager.generate()
             cls._x25519_priv, cls._x25519_pub = ExchangeKeyManager.generate()
             keys = {
@@ -389,7 +400,7 @@ class ServerCrypto:
             tag = encryptor.tag
             with open(cls._encrypted_file, 'wb') as f:
                 f.write(salt + nonce + ct + tag)
-            print("[ServerCrypto] ÒÑÉú³ÉĞÂ·şÎñÆ÷ÃÜÔ¿²¢¼ÓÃÜ±£´æ¡£")
+            print("[ServerCrypto] å·²ç”Ÿæˆæ–°æœåŠ¡å™¨å¯†é’¥å¹¶åŠ å¯†ä¿å­˜ã€‚")
 
     @classmethod
     def get_ed25519_pub_pem(cls):
@@ -401,20 +412,19 @@ class ServerCrypto:
 
     @classmethod
     def encrypt_for_server(cls, data: bytes) -> dict:
-        """¿Í»§¶Ëµ÷ÓÃ£ºÊ¹ÓÃ·şÎñÆ÷ X25519 ¹«Ô¿¼ÓÃÜÊı¾İ£¬·µ»Ø JSON ¿ÉĞòÁĞ»¯µÄ×Öµä"""
+        """å®¢æˆ·ç«¯è°ƒç”¨ï¼šä½¿ç”¨æœåŠ¡å™¨ X25519 å…¬é’¥åŠ å¯†æ•°æ®ï¼Œè¿”å› JSON å¯åºåˆ—åŒ–çš„å­—å…¸"""
         eph_priv = x25519.X25519PrivateKey.generate()
         eph_pub = eph_priv.public_key()
         shared = eph_priv.exchange(cls._x25519_pub)
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
-            length=32 + 12,
+            length=32,
             salt=None,
             info=b'server-enc',
             backend=default_backend()
         )
-        km = hkdf.derive(shared)
-        aes_key = km[:32]
-        nonce = km[32:44]
+        aes_key = hkdf.derive(shared)
+        nonce = os.urandom(12)
         cipher = Cipher(algorithms.AES(aes_key), modes.GCM(nonce), backend=default_backend())
         encryptor = cipher.encryptor()
         ct = encryptor.update(data) + encryptor.finalize()
@@ -423,26 +433,39 @@ class ServerCrypto:
             'eph_pub': base64.b64encode(eph_pub.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)).decode(),
             'ct': base64.b64encode(ct).decode(),
             'tag': base64.b64encode(tag).decode(),
+            'nonce': base64.b64encode(nonce).decode(),
         }
 
     @classmethod
     def decrypt_from_client(cls, encrypted_dict: dict) -> bytes:
-        """·şÎñÆ÷µ÷ÓÃ£º½âÃÜÃÜÎÄ£¬·µ»ØÃ÷ÎÄ bytes"""
+        """æœåŠ¡å™¨è°ƒç”¨ï¼šè§£å¯†å¯†æ–‡ï¼Œè¿”å›æ˜æ–‡ bytes"""
         eph_pub_bytes = base64.b64decode(encrypted_dict['eph_pub'])
         eph_pub = x25519.X25519PublicKey.from_public_bytes(eph_pub_bytes)
         ct = base64.b64decode(encrypted_dict['ct'])
         tag = base64.b64decode(encrypted_dict['tag'])
+        nonce_b64 = encrypted_dict.get('nonce')
         shared = cls._x25519_priv.exchange(eph_pub)
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
-            length=32 + 12,
+            length=32,
             salt=None,
             info=b'server-enc',
             backend=default_backend()
         )
-        km = hkdf.derive(shared)
-        aes_key = km[:32]
-        nonce = km[32:44]
+        aes_key = hkdf.derive(shared)
+        if nonce_b64:
+            nonce = base64.b64decode(nonce_b64)
+        else:
+            # å…¼å®¹æ—§æ ¼å¼ï¼šå†å²ç‰ˆæœ¬æœªä¼ è¾“ nonceï¼Œä½¿ç”¨æ—§æ´¾ç”Ÿæ–¹å¼ã€‚
+            hkdf_legacy = HKDF(
+                algorithm=hashes.SHA256(),
+                length=32 + 12,
+                salt=None,
+                info=b'server-enc',
+                backend=default_backend()
+            )
+            legacy_km = hkdf_legacy.derive(shared)
+            nonce = legacy_km[32:44]
         cipher = Cipher(algorithms.AES(aes_key), modes.GCM(nonce, tag), backend=default_backend())
         decryptor = cipher.decryptor()
         plain = decryptor.update(ct) + decryptor.finalize()
@@ -451,71 +474,71 @@ class ServerCrypto:
 
 class FingerprintWords:
     """
-    SHA-256 Ö¸ÎÆ×ª»»ÎªÒ×¶ÁµÄÓ¢ÎÄµ¥´ÊÁĞ±í£¨ÀàËÆ Signal °²È«Âë£©
-    Ê¹ÓÃ BIP39 ±ê×¼Ó¢ÎÄ´Ê±í£¨2048 ¸öµ¥´Ê£©
+    SHA-256 æŒ‡çº¹è½¬æ¢ä¸ºæ˜“è¯»çš„è‹±æ–‡å•è¯åˆ—è¡¨ï¼ˆç±»ä¼¼ Signal å®‰å…¨ç ï¼‰
+    ä½¿ç”¨ BIP39 æ ‡å‡†è‹±æ–‡è¯è¡¨ï¼ˆ2048 ä¸ªå•è¯ï¼‰
     """
     
-    # ´Ó english.txt ¼ÓÔØ BIP39 ´Ê±í
+    # ä» english.txt åŠ è½½ BIP39 è¯è¡¨
     _wordlist = None
     
     @classmethod
     def _load_wordlist(cls):
-        """¼ÓÔØÄÚÇ¶´Ê±í£¬ÎÄ¼ş°æ½ö×÷Îª¼æÈİ»ØÍË"""
+        """åŠ è½½å†…åµŒè¯è¡¨ï¼Œæ–‡ä»¶ç‰ˆä»…ä½œä¸ºå…¼å®¹å›é€€"""
         if cls._wordlist is None:
             try:
                 decoded = gzip.decompress(base64.b64decode(EMBEDDED_BIP39_WORDLIST_B64_GZ))
                 cls._wordlist = [word.strip() for word in decoded.decode('utf-8').splitlines() if word.strip()]
                 if len(cls._wordlist) != 2048:
-                    raise ValueError(f"ÄÚÇ¶´Ê±íÓ¦°üº¬ 2048 ¸öµ¥´Ê£¬µ«»ñµÃ {len(cls._wordlist)} ¸ö")
+                    raise ValueError(f"å†…åµŒè¯è¡¨åº”åŒ…å« 2048 ä¸ªå•è¯ï¼Œä½†è·å¾— {len(cls._wordlist)} ä¸ª")
             except Exception as e:
                 try:
                     wordlist_path = os.path.join(os.path.dirname(__file__), 'english.txt')
                     with open(wordlist_path, 'r', encoding='utf-8') as f:
                         cls._wordlist = [word.strip() for word in f.readlines() if word.strip()]
                     if len(cls._wordlist) != 2048:
-                        raise ValueError(f"´Ê±íÓ¦°üº¬ 2048 ¸öµ¥´Ê£¬µ«»ñµÃ {len(cls._wordlist)} ¸ö")
+                        raise ValueError(f"è¯è¡¨åº”åŒ…å« 2048 ä¸ªå•è¯ï¼Œä½†è·å¾— {len(cls._wordlist)} ä¸ª")
                 except Exception as fallback_error:
-                    raise RuntimeError(f"ÎŞ·¨¼ÓÔØ BIP39 ´Ê±í: {e}; fallback: {fallback_error}")
+                    raise RuntimeError(f"æ— æ³•åŠ è½½ BIP39 è¯è¡¨: {e}; fallback: {fallback_error}")
         return cls._wordlist
     
     @staticmethod
     def fingerprint_to_words(fingerprint_hex: str, word_count: int = 6) -> list:
         """
-        ½« SHA-256 Ê®Áù½øÖÆÖ¸ÎÆ×ª»»Îªµ¥´ÊÁĞ±í
+        å°† SHA-256 åå…­è¿›åˆ¶æŒ‡çº¹è½¬æ¢ä¸ºå•è¯åˆ—è¡¨
         
         Args:
-            fingerprint_hex: 64 Î»Ê®Áù½øÖÆ×Ö·û´®£¨32 ×Ö½Ú SHA-256 ¹şÏ££©
-            word_count: ÒªÉú³ÉµÄµ¥´ÊÊı£¨Ä¬ÈÏ 6£¬¶ÔÓ¦ 66 bit£©
+            fingerprint_hex: 64 ä½åå…­è¿›åˆ¶å­—ç¬¦ä¸²ï¼ˆ32 å­—èŠ‚ SHA-256 å“ˆå¸Œï¼‰
+            word_count: è¦ç”Ÿæˆçš„å•è¯æ•°ï¼ˆé»˜è®¤ 6ï¼Œå¯¹åº” 66 bitï¼‰
         
         Returns:
-            Ó¢ÎÄµ¥´ÊÁĞ±í
+            è‹±æ–‡å•è¯åˆ—è¡¨
         
         Raises:
-            ValueError: ÊäÈëÎŞĞ§
+            ValueError: è¾“å…¥æ— æ•ˆ
         """
         if not isinstance(fingerprint_hex, str) or len(fingerprint_hex) != 64:
-            raise ValueError(f"Ö¸ÎÆ±ØĞëÊÇ 64 Î»Ê®Áù½øÖÆ×Ö·û´®£¬»ñµÃ: {fingerprint_hex}")
+            raise ValueError(f"æŒ‡çº¹å¿…é¡»æ˜¯ 64 ä½åå…­è¿›åˆ¶å­—ç¬¦ä¸²ï¼Œè·å¾—: {fingerprint_hex}")
         
         if word_count < 1 or word_count > 24:
-            raise ValueError(f"µ¥´ÊÊı±ØĞëÔÚ 1-24 Ö®¼ä£¬»ñµÃ: {word_count}")
+            raise ValueError(f"å•è¯æ•°å¿…é¡»åœ¨ 1-24 ä¹‹é—´ï¼Œè·å¾—: {word_count}")
         
         try:
             fingerprint_bytes = bytes.fromhex(fingerprint_hex)
         except ValueError as e:
-            raise ValueError(f"ÎŞĞ§µÄÊ®Áù½øÖÆÖ¸ÎÆ: {e}")
+            raise ValueError(f"æ— æ•ˆçš„åå…­è¿›åˆ¶æŒ‡çº¹: {e}")
         
         wordlist = FingerprintWords._load_wordlist()
         
-        # ¼ÆËãĞèÒªµÄ±ÈÌØÊı£ºword_count * 11
+        # è®¡ç®—éœ€è¦çš„æ¯”ç‰¹æ•°ï¼šword_count * 11
         total_bits = word_count * 11
         
-        # ½«×Ö½Ú×ª»»Îª±ÈÌØ×Ö·û´®
+        # å°†å­—èŠ‚è½¬æ¢ä¸ºæ¯”ç‰¹å­—ç¬¦ä¸²
         bit_string = ''.join(format(byte, '08b') for byte in fingerprint_bytes)
         
-        # È¡Ç° total_bits ±ÈÌØ
+        # å–å‰ total_bits æ¯”ç‰¹
         bit_string = bit_string[:total_bits]
         
-        # Ã¿ 11 ±ÈÌØÓ³ÉäÎªÒ»¸öµ¥´ÊË÷Òı
+        # æ¯ 11 æ¯”ç‰¹æ˜ å°„ä¸ºä¸€ä¸ªå•è¯ç´¢å¼•
         words = []
         for i in range(word_count):
             start = i * 11
@@ -523,7 +546,7 @@ class FingerprintWords:
             index_bits = bit_string[start:end]
             index = int(index_bits, 2)
             if index >= len(wordlist):
-                raise RuntimeError(f"Ë÷ÒıÔ½½ç: {index} >= {len(wordlist)}")
+                raise RuntimeError(f"ç´¢å¼•è¶Šç•Œ: {index} >= {len(wordlist)}")
             words.append(wordlist[index])
         
         return words
@@ -531,41 +554,41 @@ class FingerprintWords:
     @staticmethod
     def words_to_fingerprint(words: list) -> str:
         """
-        ½«µ¥´ÊÁĞ±í×ª»»»ØÊ®Áù½øÖÆÖ¸ÎÆ£¨ÓÃÓÚÑéÖ¤£©
+        å°†å•è¯åˆ—è¡¨è½¬æ¢å›åå…­è¿›åˆ¶æŒ‡çº¹ï¼ˆç”¨äºéªŒè¯ï¼‰
         
         Args:
-            words: Ó¢ÎÄµ¥´ÊÁĞ±í
+            words: è‹±æ–‡å•è¯åˆ—è¡¨
         
         Returns:
-            Ê®Áù½øÖÆÖ¸ÎÆ×Ö·û´®
+            åå…­è¿›åˆ¶æŒ‡çº¹å­—ç¬¦ä¸²
         
         Raises:
-            ValueError: µ¥´ÊÎŞĞ§»ò×ª»»Ê§°Ü
+            ValueError: å•è¯æ— æ•ˆæˆ–è½¬æ¢å¤±è´¥
         """
         if not isinstance(words, list) or len(words) == 0:
-            raise ValueError("µ¥´ÊÁĞ±í²»ÄÜÎª¿Õ")
+            raise ValueError("å•è¯åˆ—è¡¨ä¸èƒ½ä¸ºç©º")
         
         wordlist = FingerprintWords._load_wordlist()
         word_count = len(words)
         
-        # ½¨Á¢µ¥´Êµ½Ë÷ÒıµÄÓ³Éä
+        # å»ºç«‹å•è¯åˆ°ç´¢å¼•çš„æ˜ å°„
         word_to_index = {word: idx for idx, word in enumerate(wordlist)}
         
-        # ½«Ã¿¸öµ¥´Ê×ª»»Îª 11 ±ÈÌØµÄË÷Òı
+        # å°†æ¯ä¸ªå•è¯è½¬æ¢ä¸º 11 æ¯”ç‰¹çš„ç´¢å¼•
         bit_string = ''
         for word in words:
             if word not in word_to_index:
-                raise ValueError(f"ÎŞĞ§µÄµ¥´Ê: {word}")
+                raise ValueError(f"æ— æ•ˆçš„å•è¯: {word}")
             index = word_to_index[word]
             bit_string += format(index, '011b')
         
-        # ¼ÆËãÓ¦ÓĞµÄ×Ö½ÚÊı£¨ÏòÉÏÈ¡Õû£©
+        # è®¡ç®—åº”æœ‰çš„å­—èŠ‚æ•°ï¼ˆå‘ä¸Šå–æ•´ï¼‰
         byte_count = (len(bit_string) + 7) // 8
         
-        # ½«±ÈÌØ×Ö·û´®Ìî³äµ½×Ö½Ú±ß½ç
+        # å°†æ¯”ç‰¹å­—ç¬¦ä¸²å¡«å……åˆ°å­—èŠ‚è¾¹ç•Œ
         bit_string = bit_string.ljust(byte_count * 8, '0')
         
-        # ½«±ÈÌØ×ª»»»Ø×Ö½Ú
+        # å°†æ¯”ç‰¹è½¬æ¢å›å­—èŠ‚
         fingerprint_bytes = bytes(int(bit_string[i:i+8], 2) for i in range(0, len(bit_string), 8))
         
         return fingerprint_bytes.hex()
