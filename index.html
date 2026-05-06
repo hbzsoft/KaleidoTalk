@@ -271,9 +271,29 @@
             margin-bottom: 0.5rem;
         }
 
+        /* 合规提示框样式 */
+        .compliance-box {
+            background: #fef9e6;
+            border-left: 4px solid #e6a017;
+            border-radius: 16px;
+            padding: 1rem 1.2rem;
+            margin: 2rem 0 1rem;
+            font-size: 0.85rem;
+            color: #5a4a1a;
+            text-align: center;
+        }
+        .compliance-box a {
+            color: #1e6f5c;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .compliance-box a:hover {
+            text-decoration: underline;
+        }
+
         footer {
             border-top: 1px solid #e2e8f0;
-            margin-top: 4rem;
+            margin-top: 2rem;
             padding: 2rem 0;
             text-align: center;
             color: #5b6e8c;
@@ -351,6 +371,14 @@
         <p>当前稳定版本：<strong>V2.2</strong> | 适用于 Windows / Linux / macOS</p>
         <a href="https://kaleidotalk.hanbangze.tech/release.zip" class="btn btn-white">⬇️ 下载 release.zip</a>
         <p style="margin-top: 0.8rem; font-size: 0.8rem; opacity: 0.8;">解压后运行 <code>python server.py</code> 启动服务端，<code>python client.py</code> 启动客户端</p>
+    </div>
+
+    <!-- ========== 新增的合规提示框（方案一） ========== -->
+    <div class="compliance-box">
+        <strong>⚠️ 法律合规提示</strong><br>
+        KaleidoTalk 是一个开源的端到端加密聊天软件，<strong>仅供技术学习和合法用途</strong>。
+        作者不运营任何公开的 KaleidoTalk 服务器。如果您计划在公网部署本软件，请自行确保符合所在地法律法规。
+        详细的合规声明请参阅 <a href="https://github.com/hbzsoft/KaleidoTalk/blob/main/COMPLIANCE.md" target="_blank">COMPLIANCE.md</a>。
     </div>
 
     <!-- 命名哲学：KaleidoTalk 的灵魂 -->
@@ -512,7 +540,16 @@ along with this program. If not, see &lt;https://www.gnu.org/licenses/&gt;.</pre
         </div>
     </section>
 
+    <!-- 修改后的 footer：保留原有内容，增加合规提示框与法律链接 -->
     <footer>
+        <div style="margin-bottom: 0.8rem;">
+            <a href="https://github.com/hbzsoft/KaleidoTalk/blob/main/COMPLIANCE.md" target="_blank" style="color:#5b6e8c; text-decoration:underline; font-size:0.8rem;">📜 法律合规声明</a>
+            &nbsp;|&nbsp;
+            <a href="https://github.com/hbzsoft/KaleidoTalk/blob/main/NOTICE" target="_blank" style="color:#5b6e8c; text-decoration:underline; font-size:0.8rem;">第三方版权声明</a>
+        </div>
+        <div style="font-size:0.75rem; color:#7b8aa6; max-width:800px; margin:0 auto 1rem auto;">
+            ⚠️ 本软件仅供技术学习与合法用途。作者不运营任何公开服务器。部署公网服务请自行确保符合所在地法律。
+        </div>
         © 2026 Bangze Han · KaleidoTalk 遵循 GPL-3.0 协议 · 为隐私而设计的聊天软件<br/>
         <span style="font-size:0.75rem;">“Privacy is a human right.” —— 每一次对话，都像万花筒里的一次转动，只属于你自己。</span>
     </footer>
