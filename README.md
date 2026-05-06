@@ -1,8 +1,7 @@
 
 # KaleidoTalk
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![合规声明](https://img.shields.io/badge/合规-声明-blue)](COMPLIANCE.md)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)  
 
 **Secure end-to-end encrypted chat software**
 
@@ -14,7 +13,7 @@ KaleidoTalk 是一款端到端加密聊天软件，采用 Ed25519 身份密钥�
 
 请在使用或部署本软件前，阅读完整的 **[合规声明](COMPLIANCE.md)** 和 **[免责声明](DISCLAIMER.md)**。
 
-**简要提醒**：KaleidoTalk 是一个开源学习项目。如果您计划在公网部署，请自行确保符合当地法律。个人开发者在中国大陆境内合规部署并公网运营类似服务几乎不可行。
+**简要提醒**：KaleidoTalk 是一个开源学习项目。如果您计划在公网部署，请自行确保符合当地法律。
 
 ## ✨ 功能特性
 
