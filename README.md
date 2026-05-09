@@ -23,7 +23,7 @@ KaleidoTalk 是一款端到端加密聊天软件，采用 Ed25519 身份密钥�
 - **离线消息队列**：用户上线后自动接收离线期间的消息
 - **IP/用户封禁**：管理员可封禁恶意 IP 或用户，支持临时/永久封禁
 - **DoS 防护**：注册/登录频率限制，自动封禁异常 IP
-- **图形界面**：基于 tkinter 的跨平台 GUI，支持系统托盘
+- **图形界面**：基于 CustomTkinter 的跨平台 GUI，支持系统托盘
 
 ## 🔐 加密协议
 
@@ -48,12 +48,12 @@ KaleidoTalk 是一款端到端加密聊天软件，采用 Ed25519 身份密钥�
 ### 环境要求
 
 - Python 3.8+
-- 依赖库：`cryptography`, `pystray`, `Pillow`
+- 依赖库：`cryptography`, `pystray`, `Pillow`，`CustomTkinter`
 
 ### 安装依赖
 
 ```bash
-pip install cryptography pystray Pillow
+pip install cryptography pystray Pillow customtkinter
 ```
 
 ### 启动服务器
