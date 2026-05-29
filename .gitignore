@@ -2,6 +2,8 @@
 __pycache__/
 *.py[cod]
 *$py.class
+
+# C extensions
 *.so
 
 # Distribution / packaging
@@ -27,6 +29,7 @@ MANIFEST
 # PyInstaller
 *.manifest
 *.spec
+packages/
 
 # Installer logs
 pip-log.txt
@@ -133,16 +136,43 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
+# ===== KaleidoTalk 特定 =====
+
+# 运行时生成的数据文件
 users.json
 user_keys.json
 invite_codes.json
 bans.json
 server.log
 
-
-local_keys/
+# 密钥目录（服务器和客户端）
 server_keys/
+local_keys/
 
 # 临时文件
 *.tmp
 *.enc
+*.pem
+*.key
+*.crt
+
+# 打包文件（通过 GitHub Releases 分发，不要提交到仓库）
+*.zip
+*.tar.gz
+*.whl
+
+# 数据库文件（如果将来改用 SQLite）
+*.sqlite3
+*.db
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE 配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
