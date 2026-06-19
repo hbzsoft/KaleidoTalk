@@ -1,0 +1,186 @@
+# ==================================================
+# Python bytecode & runtime
+# ==================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ==================================================
+# Distribution & packaging
+# ==================================================
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ==================================================
+# PyInstaller
+# ==================================================
+*.manifest
+*.spec
+packages/
+
+# ==================================================
+# Logs & databases
+# ==================================================
+*.log
+*.sqlite3
+*.db
+db.sqlite3
+db.sqlite3-journal
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ==================================================
+# Coverage & test reports
+# ==================================================
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# ==================================================
+# Virtual environments
+# ==================================================
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+pythonenv*
+
+# ==================================================
+# IDE & editor files
+# ==================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==================================================
+# KaleidoTalk specific runtime data
+# ==================================================
+# Server runtime files (generated on first run)
+users.json
+user_keys.json
+invite_codes.json
+bans.json
+server.log
+
+# Server keys & TLS certs (do not commit)
+server_keys/
+
+# Client local keys & trust store
+local_keys/
+
+# Configuration (if you want to keep local config separate)
+config.json
+
+# Temporary files
+*.tmp
+*.enc
+*.pem
+*.key
+*.crt
+
+# ==================================================
+# Distribution archives (built via GitHub Releases)
+# ==================================================
+*.zip
+*.tar.gz
+*.whl
+
+# ==================================================
+# Miscellaneous
+# ==================================================
+# Sphinx
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv / poetry / pdm
+Pipfile.lock
+poetry.lock
+.pdm.toml
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath
+*.sage.py
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Rope
+.ropeproject
+
+# mkdocs
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# pytype
+.pytype/
+
+# Cython debug
+cython_debug/
+
+# ==================================================
+# Keep test scripts but ignore their compiled versions
+# ==================================================
+test/*.pyc
+test/__pycache__/

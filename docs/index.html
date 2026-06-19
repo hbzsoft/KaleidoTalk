@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <meta name="description" content="KaleidoTalk — End-to-end encrypted chat with X25519 key rotation and irreversible account freeze. Protect your privacy, even from your server.">
+    <title>KaleidoTalk · Encrypted Chat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(165deg, #f0f5fe 0%, #e8eff9 100%);
+            font-family: system-ui, -apple-system, 'Segoe UI', 'Roboto', 'Noto Sans', sans-serif;
+            color: #1a2634;
+            line-height: 1.6;
+            scroll-behavior: smooth;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+
+        .nav {
+            padding: 1.8rem 0;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+        }
+
+        .logo {
+            font-weight: 800;
+            font-size: 1.6rem;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #0f2e45, #1e6f5c);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+
+        .nav-links a {
+            margin-left: 2rem;
+            text-decoration: none;
+            color: #2c3e4e;
+            font-weight: 500;
+            font-size: 0.95rem;
+            transition: color 0.2s;
+        }
+        .nav-links a:hover {
+            color: #1e6f5c;
+        }
+
+        .hero {
+            padding: 4.5rem 0 3rem;
+            text-align: center;
+        }
+
+        .hero h1 {
+            font-size: 3.6rem;
+            font-weight: 850;
+            background: linear-gradient(145deg, #0f2e45, #1976a5);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+            letter-spacing: -0.02em;
+        }
+
+        .hero .tagline {
+            font-size: 1.4rem;
+            color: #1e4663;
+            margin-top: 0.8rem;
+            font-weight: 450;
+        }
+
+        .hero .subtitle {
+            font-size: 1.05rem;
+            color: #3a6a8a;
+            margin-top: 0.4rem;
+            max-width: 700px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .badge-group {
+            margin: 2rem 0 2.2rem;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 0.7rem;
+        }
+
+        /* 所有标签样式统一 */
+        .badge {
+            background: rgba(255,255,255,0.7);
+            backdrop-filter: blur(4px);
+            padding: 0.3rem 1rem;
+            border-radius: 40px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #1e4663;
+            border: 1px solid rgba(30, 70, 99, 0.15);
+        }
+
+        .cta-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 1.5rem;
+        }
+
+        .btn {
+            display: inline-block;
+            background: #1e4663;
+            color: white;
+            text-decoration: none;
+            padding: 0.8rem 2.2rem;
+            border-radius: 40px;
+            font-weight: 600;
+            transition: 0.2s;
+            border: none;
+            cursor: pointer;
+        }
+        .btn-outline {
+            background: transparent;
+            border: 1.5px solid #1e4663;
+            color: #1e4663;
+        }
+        .btn-outline:hover {
+            background: #eef3fc;
+            transform: translateY(-2px);
+        }
+        .btn:hover {
+            background: #0f2e45;
+            transform: translateY(-2px);
+        }
+
+        .download-card {
+            background: linear-gradient(135deg, #1e4663 0%, #0f2e45 100%);
+            color: white;
+            text-align: center;
+            border-radius: 32px;
+            padding: 2.5rem 2rem;
+            margin: 2rem 0;
+        }
+        .download-card .btn-white {
+            background: white;
+            color: #1e4663;
+            margin-top: 1rem;
+        }
+        .download-card .btn-white:hover {
+            background: #eef3fc;
+        }
+
+        .compliance-box {
+            background: #fef9e6;
+            border-left: 5px solid #e6a017;
+            border-radius: 16px;
+            padding: 1.2rem 1.5rem;
+            margin: 2rem 0 1rem;
+            font-size: 0.85rem;
+            color: #5a4a1a;
+            text-align: center;
+        }
+        .compliance-box a {
+            color: #1e6f5c;
+            font-weight: 500;
+        }
+
+        section {
+            margin: 4rem 0;
+        }
+        .section-title {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 2rem;
+            border-left: 5px solid #1e6f5c;
+            padding-left: 1.2rem;
+        }
+
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+        }
+        .card {
+            background: rgba(255,255,255,0.7);
+            backdrop-filter: blur(4px);
+            border-radius: 24px;
+            padding: 1.8rem;
+            border: 1px solid rgba(255,255,255,0.8);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.03);
+            transition: all 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 32px rgba(0,0,0,0.06);
+        }
+        .card h3 {
+            font-size: 1.4rem;
+            margin-bottom: 0.6rem;
+            font-weight: 600;
+        }
+        .card p {
+            color: #2c475c;
+        }
+        .card .highlight {
+            color: #1e6f5c;
+            font-weight: 600;
+        }
+
+        .protocol-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: rgba(255,255,255,0.7);
+            backdrop-filter: blur(4px);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        .protocol-table th, .protocol-table td {
+            text-align: left;
+            padding: 1rem 1.2rem;
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+        }
+        .protocol-table th {
+            background: rgba(30, 70, 99, 0.05);
+            font-weight: 600;
+            color: #1d3e5e;
+        }
+
+        pre {
+            background: #0f1722;
+            color: #facc15;
+            padding: 1.2rem 1.5rem;
+            border-radius: 16px;
+            overflow-x: auto;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.85rem;
+            margin: 1rem 0;
+        }
+
+        code {
+            font-family: 'SF Mono', monospace;
+            background: #1e2a3e;
+            color: #facc15;
+            padding: 0.2rem 0.5rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+        }
+
+        .file-tree {
+            background: rgba(255,255,255,0.6);
+            backdrop-filter: blur(4px);
+            padding: 1.5rem 2rem;
+            border-radius: 20px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+        }
+
+        .philosophy-box {
+            background: linear-gradient(135deg, #e8f0f7 0%, #dce6f0 100%);
+            border-radius: 28px;
+            padding: 2.5rem;
+            border-left: 6px solid #1e6f5c;
+        }
+        .philosophy-box h3 {
+            font-size: 1.8rem;
+            margin-bottom: 1rem;
+            color: #1a3a4e;
+        }
+        .metaphor-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1.2rem;
+            margin-top: 1.5rem;
+        }
+        .metaphor-item {
+            background: white;
+            border-radius: 20px;
+            padding: 1.2rem 1.2rem;
+            text-align: center;
+        }
+        .metaphor-item strong {
+            font-size: 1.1rem;
+            color: #1e6f5c;
+            display: block;
+            margin-bottom: 0.4rem;
+        }
+
+        .new-feature-highlight {
+            background: linear-gradient(135deg, #1e6f5c 0%, #0f4a3a 100%);
+            color: white;
+            border-radius: 28px;
+            padding: 2rem;
+            margin: 2rem 0;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+        .new-feature-highlight h3 {
+            font-size: 1.6rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        .new-feature-highlight p {
+            opacity: 0.9;
+        }
+
+        footer {
+            border-top: 1px solid rgba(0,0,0,0.06);
+            margin-top: 3rem;
+            padding: 2.5rem 0;
+            text-align: center;
+            color: #5b6e8c;
+            font-size: 0.85rem;
+        }
+
+        @media (max-width: 700px) {
+            .container { padding: 0 1.2rem; }
+            .hero h1 { font-size: 2.4rem; }
+            .section-title { font-size: 1.6rem; }
+            .new-feature-highlight {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+            }
+            .nav-links a {
+                margin-left: 1rem;
+                font-size: 0.85rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="nav">
+        <div class="logo">KaleidoTalk</div>
+        <div class="nav-links">
+            <a href="#story">Story</a>
+            <a href="#features">Features</a>
+            <a href="#crypto">Crypto</a>
+            <a href="#setup">Setup</a>
+            <a href="#license">License</a>
+            <a href="https://github.com/hbzsoft/KaleidoTalk" target="_blank">GitHub</a>
+        </div>
+    </div>
+
+    <!-- Hero -->
+    <div class="hero">
+        <h1>KaleidoTalk</h1>
+        <div class="tagline">🔐 Encrypted chat that evolves — every turn, a new pattern.</div>
+        <div class="subtitle">X25519 key rotation · Irreversible account freeze · Cover traffic · TLS · BIP39 fingerprints</div>
+        <div class="badge-group">
+            <span class="badge">Ed25519 + X25519</span>
+            <span class="badge">AES-256-GCM</span>
+            <span class="badge">Key Rotation</span>
+            <span class="badge">Account Freeze</span>   <!-- 现在和别的标签完全一样 -->
+            <span class="badge">Cover Traffic</span>
+            <span class="badge">GPL v3</span>
+        </div>
+        <div class="cta-buttons">
+            <a href="https://github.com/hbzsoft/KaleidoTalk" class="btn">GitHub Repository</a>
+            <a href="https://github.com/hbzsoft/KaleidoTalk/archive/refs/tags/v2.3.zip" class="btn btn-outline">📦 Download ZIP</a>
+        </div>
+    </div>
+
+    <!-- Download card -->
+    <div class="download-card">
+        <h3>📥 Get KaleidoTalk</h3>
+        <p>Latest stable: <strong>v2.3</strong> · Windows / Linux / macOS</p>
+        <a href="https://kaleidotalk.hanbangze.tech/release.zip" class="btn btn-white">⬇️ Download release.zip</a>
+        <p style="margin-top: 0.8rem; font-size: 0.8rem; opacity: 0.8;">Extract and run <code>python run_server.py</code> · <code>python run_client.py</code></p>
+    </div>
+
+    <!-- Compliance -->
+    <div class="compliance-box">
+        <strong>⚠️ Legal compliance</strong><br>
+        KaleidoTalk is open‑source and <strong>intended for lawful use only</strong>.
+        The author does not operate any public servers. If you deploy publicly, ensure compliance with local law.
+        <a href="https://github.com/hbzsoft/KaleidoTalk/blob/main/COMPLIANCE.md" target="_blank">Read COMPLIANCE.md</a>
+    </div>
+
+    <!-- Story / Philosophy -->
+    <section id="story">
+        <div class="philosophy-box">
+            <h3>🎨 Why "KaleidoTalk"?</h3>
+            <p><strong>KaleidoTalk = Kaleidoscope + Talk</strong> — because every conversation should be as unique and ephemeral as a kaleidoscope pattern. Built for privacy, designed for trust.</p>
+            <div class="metaphor-list">
+                <div class="metaphor-item">
+                    <strong>🌀 Ever‑changing</strong>
+                    <p style="font-size:0.85rem;">Each message uses a fresh ephemeral key. The same text, sent twice, encrypts to completely different ciphertext.</p>
+                </div>
+                <div class="metaphor-item">
+                    <strong>🧩 Composed of trusted parts</strong>
+                    <p style="font-size:0.85rem;">Ed25519, X25519, AES‑256‑GCM, HKDF — industry‑standard primitives, assembled into a robust whole.</p>
+                </div>
+                <div class="metaphor-item">
+                    <strong>📦 Server‑blind</strong>
+                    <p style="font-size:0.85rem;">The server sees only ciphertext. It never knows the content, nor whom you talk to — just a sealed tube.</p>
+                </div>
+                <div class="metaphor-item">
+                    <strong>✨ Light of privacy</strong>
+                    <p style="font-size:0.85rem;">“Privacy is a human right” — that light illuminates the fragments and gives them meaning.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- New Features Highlight -->
+    <section>
+        <div class="section-title">🚀 What's New in v3.0</div>
+        <div class="new-feature-highlight">
+            <div>
+                <h3>🔄 X25519 Key Rotation</h3>
+                <p>Your exchange keys are automatically rotated every 24 hours. Even if a private key is compromised, only messages from that narrow window are exposed — not your entire chat history.</p>
+                <p style="margin-top: 0.6rem; font-size:0.9rem;">✅ Forward secrecy extended · <span style="font-weight:600;">Leak impact reduced from "forever" to "hours"</span></p>
+            </div>
+            <div>
+                <h3>🔒 Irreversible Account Freeze</h3>
+                <p>Generate a recovery certificate during registration. If your account is stolen, you can permanently freeze it — no one, not even the server admin, can unfreeze it.</p>
+                <p style="margin-top: 0.6rem; font-size:0.9rem;">✅ No backdoor · <span style="font-weight:600;">Your account dies, but never falls into wrong hands</span></p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features">
+        <div class="section-title">✨ Core Features</div>
+        <div class="card-grid">
+            <div class="card"><h3>🔒 End‑to‑End Encryption</h3><p>Ed25519 identity + X25519 ECDH + AES‑256‑GCM. The server stores only ciphertext — it never sees your messages.</p></div>
+            <div class="card"><h3>🛡️ Cover Traffic</h3><p>All packets are fixed to <span class="highlight">2048 bytes</span> with random padding. Heartbeats at random intervals (3.3–6.7s) defeat timing analysis.</p></div>
+            <div class="card"><h3>🔐 TLS + TOFU</h3><p>Self‑signed certificates verified by BIP39 words on first connection. No CA dependency — you control trust.</p></div>
+            <div class="card"><h3>🗄️ Dual Key Storage</h3><p>Store private keys on the server (encrypted) for multi‑device use, or keep them local-only — your choice.</p></div>
+            <div class="card"><h3>🆔 Word‑based Fingerprints</h3><p>Public key fingerprints shown as 6 BIP39 words. Verify them via phone or in‑person — no complicated hashes.</p></div>
+            <div class="card"><h3>📨 Offline Queues</h3><p>Messages are cached on the server and delivered automatically when your friend comes online.</p></div>
+            <div class="card"><h3>🚦 Invite Codes & Bans</h3><p>Control registration with invite codes. Ban IPs or users. Rate‑limiting protects against DoS.</p></div>
+            <div class="card"><h3>🖥️ Cross‑Platform GUI</h3><p>Modern CustomTkinter interface with system tray, dark theme, and unread badges.</p></div>
+        </div>
+    </section>
+
+    <!-- Crypto -->
+    <section id="crypto">
+        <div class="section-title">🔐 Protocol Stack</div>
+        <table class="protocol-table">
+            <thead><tr><th>Component</th><th>Algorithm</th><th>Purpose</th></tr></thead>
+            <tbody>
+                <tr><td>Identity</td><td>Ed25519</td><td>Signature & authentication</td></tr>
+                <tr><td>Key Exchange</td><td>X25519 (ECDH)</td><td>Shared secret negotiation</td></tr>
+                <tr><td>Symmetric</td><td>AES‑256‑GCM</td><td>Encryption + integrity</td></tr>
+                <tr><td>KDF</td><td>HKDF‑SHA256</td><td>Derive AES key & nonce</td></tr>
+                <tr><td>Password Storage</td><td>PBKDF2‑SHA256 (600k)</td><td>Server‑side hash, brute‑force resistant</td></tr>
+                <tr><td>Transport</td><td>TLS 1.2+ (RSA 2048)</td><td>Client‑server channel (self‑signed + TOFU)</td></tr>
+            </tbody>
+        </table>
+        <div style="margin-top:1.2rem; background:rgba(255,255,255,0.6); border-radius:18px; padding:1.2rem 1.5rem;">
+            <p><strong>Message flow:</strong> Ephemeral X25519 → ECDH → HKDF → AES‑256‑GCM → Ed25519 signature → verify → decrypt.</p>
+            <p style="font-size:0.9rem; margin-top:0.4rem;">💡 This is the <em>kaleidoscope</em> effect: every message uses a fresh key, so the ciphertext pattern never repeats.</p>
+        </div>
+    </section>
+
+    <!-- Setup -->
+    <section id="setup">
+        <div class="section-title">📦 Setup & Run</div>
+        <div class="card" style="background:rgba(255,255,255,0.7); backdrop-filter:blur(4px);">
+            <h3>Requirements</h3>
+            <ul style="margin-left:1.8rem; margin-top:0.4rem;">
+                <li>Python 3.8+</li>
+                <li>Install dependencies: <code>cryptography</code> · <code>pystray</code> · <code>Pillow</code> · <code>customtkinter</code></li>
+            </ul>
+            <pre><code>pip install cryptography pystray Pillow customtkinter</code></pre>
+
+            <h3 style="margin-top:1.5rem;">🚀 Start Server</h3>
+            <pre><code>python run_server.py</code></pre>
+            <p>On first run, set an admin password to protect server keys (generated in <code>server_keys/</code>).</p>
+
+            <h3 style="margin-top:1.5rem;">💬 Start Client</h3>
+            <pre><code>python run_client.py</code></pre>
+            <p>Default server: <code>127.0.0.1:5555</code>. Register, then log in and start encrypted chats.</p>
+
+            <h3 style="margin-top:1.5rem;">🛠️ Admin Commands</h3>
+            <pre><code># Generate invite codes
+python admin.py invites add --count 5 --uses 1 --length 8
+
+# Require invite codes for registration
+python admin.py invites set-require true
+
+# Ban IP / user
+python admin.py ban ip 192.168.1.10 --duration 3600
+python admin.py ban user alice
+python admin.py list-bans</code></pre>
+        </div>
+
+        <div class="file-tree" style="margin-top:2rem;">
+            <strong>📁 Project structure</strong><br/>
+            KaleidoTalk/<br/>
+            ├── <strong>run_client.py</strong><br/>
+            ├── <strong>run_server.py</strong><br/>
+            ├── <strong>src/</strong><br/>
+            │   ├── <strong>client/</strong>   · GUI & client logic<br/>
+            │   ├── <strong>server/</strong>   · commands, sessions, storage<br/>
+            │   ├── <strong>common/</strong>   · crypto, network, padding<br/>
+            │   └── <strong>admin.py</strong><br/>
+            ├── <strong>requirements.txt</strong><br/>
+            ├── <strong>LICENSE</strong> (GPLv3)<br/>
+            └── <strong>NOTICE</strong><br/>
+            <span style="color:#5e7a93;">Runtime: users.json, user_keys.json, bans.json, invite_codes.json, local_keys/, server_keys/</span>
+        </div>
+    </section>
+
+    <!-- Trust model -->
+    <section>
+        <div class="section-title">🔏 Trust Model</div>
+        <div class="card-grid">
+            <div class="card"><h3>🆔 Server Fingerprints</h3><p>TLS certificate fingerprint verified via BIP39 words on first connection. Ed25519 public key delivered over TLS — no additional out‑of‑band check needed.</p></div>
+            <div class="card"><h3>👥 User Fingerprints</h3><p>Compare 6 BIP39 words with your friend via phone or in‑person. Once verified, messages are automatically decrypted.</p></div>
+            <div class="card"><h3>🔐 Trust Store Integrity</h3><p>Local trust database is HMAC‑SHA256 protected against tampering.</p></div>
+        </div>
+    </section>
+
+    <!-- License -->
+    <section id="license">
+        <div class="section-title">📄 License</div>
+        <div class="card" style="background:rgba(255,255,255,0.7); backdrop-filter:blur(4px);">
+            <p><strong>KaleidoTalk</strong> is free software under the <strong>GNU General Public License v3.0</strong>.</p>
+            <pre style="background:#0f1722; color:#cbd5e6;"><span style="color:#81e6d9;">KaleidoTalk Copyright (C) 2026 Bangze Han</span>
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see &lt;https://www.gnu.org/licenses/&gt;.</pre>
+            <p style="margin-top:1rem;">📚 Third‑party libraries: <code>cryptography</code> (Apache 2.0), <code>pystray</code> (LGPLv3), <code>Pillow</code> (HPND), <code>customtkinter</code> (MIT)</p>
+        </div>
+    </section>
+
+    <!-- Contribute -->
+    <section>
+        <div class="section-title">🌟 Contribute</div>
+        <div class="card" style="text-align:center; background:rgba(255,255,255,0.7); backdrop-filter:blur(4px);">
+            <p>Issues, PRs, and ⭐ stars are welcome. The project is stable and tested on Python 3.10+.</p>
+            <div class="cta-buttons" style="margin-top:1rem;">
+                <a href="https://github.com/hbzsoft/KaleidoTalk/issues" class="btn btn-outline">Report Issue</a>
+                <a href="https://github.com/hbzsoft/KaleidoTalk" class="btn btn-outline">Source Code</a>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div style="margin-bottom:0.8rem;">
+            <a href="https://github.com/hbzsoft/KaleidoTalk/blob/main/COMPLIANCE.md" target="_blank" style="color:#5b6e8c;">📜 Compliance</a>
+            &nbsp;·&nbsp;
+            <a href="https://github.com/hbzsoft/KaleidoTalk/blob/main/NOTICE" target="_blank" style="color:#5b6e8c;">Notices</a>
+        </div>
+        <div style="font-size:0.75rem; color:#7b8aa6; max-width:800px; margin:0 auto 1rem auto;">
+            ⚠️ For technical learning and lawful use only. The author does not operate public servers.
+        </div>
+        © 2026 Bangze Han · KaleidoTalk is GPL‑3.0 · built for privacy<br/>
+        <span style="font-size:0.75rem;">“Privacy is a human right.” — every conversation, like a kaleidoscope turn, belongs only to you.</span>
+    </footer>
+</div>
+</body>
+</html>
