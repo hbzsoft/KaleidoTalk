@@ -275,10 +275,11 @@ class MessageEncryptorV2:
         # ECDH
         shared_secret = eph_priv.exchange(recipient_x25519_pub)
         # HKDF
+        salt = os.urandom(16)
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
             length=32,
-            salt=None,
+            salt=salt,
             info=b'kaleido-msg',
             backend=default_backend()
         )
@@ -299,6 +300,7 @@ class MessageEncryptorV2:
             'tag': base64.b64encode(tag).decode(),
             'nonce': base64.b64encode(nonce).decode(),
             'sig': base64.b64encode(signature).decode(),
+            'salt': base64.b64encode(salt).decode(),
         }
         if key_id:
             packet['key_id'] = key_id
@@ -317,32 +319,22 @@ class MessageEncryptorV2:
             tag = base64.b64decode(p['tag'])
             nonce_b64 = p.get('nonce')
             sig = base64.b64decode(p['sig'])
+            salt_b64 = p.get('salt')
             # Verify signature
             signed_data = eph_pub_bytes + ct + tag
             sender_identity_pub.verify(sig, signed_data)  # Raises exception if invalid
             # ECDH
             shared_secret = recipient_x25519_priv.exchange(eph_pub)
+            salt = base64.b64decode(salt_b64) if salt_b64 else None
             hkdf = HKDF(
                 algorithm=hashes.SHA256(),
                 length=32,
-                salt=None,
+                salt=salt,
                 info=b'kaleido-msg',
                 backend=default_backend()
             )
             aes_key = hkdf.derive(shared_secret)
-            if nonce_b64:
-                nonce = base64.b64decode(nonce_b64)
-            else:
-                # Backward compatibility: legacy versions did not transmit nonce, use old derivation method.
-                hkdf_legacy = HKDF(
-                    algorithm=hashes.SHA256(),
-                    length=32 + 12,
-                    salt=None,
-                    info=b'kaleido-msg',
-                    backend=default_backend()
-                )
-                legacy_km = hkdf_legacy.derive(shared_secret)
-                nonce = legacy_km[32:44]
+            nonce = base64.b64decode(nonce_b64)
             cipher = Cipher(algorithms.AES(aes_key), modes.GCM(nonce, tag), backend=default_backend())
             decryptor = cipher.decryptor()
             plain = decryptor.update(ct) + decryptor.finalize()
@@ -460,10 +452,11 @@ class ServerCrypto:
         eph_priv = x25519.X25519PrivateKey.generate()
         eph_pub = eph_priv.public_key()
         shared = eph_priv.exchange(cls._x25519_pub)
+        salt = os.urandom(16)
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
             length=32,
-            salt=None,
+            salt=salt,
             info=b'server-enc',
             backend=default_backend()
         )
@@ -478,6 +471,7 @@ class ServerCrypto:
             'ct': base64.b64encode(ct).decode(),
             'tag': base64.b64encode(tag).decode(),
             'nonce': base64.b64encode(nonce).decode(),
+            'salt': base64.b64encode(salt).decode(),
         }
 
     @classmethod
@@ -488,28 +482,18 @@ class ServerCrypto:
         ct = base64.b64decode(encrypted_dict['ct'])
         tag = base64.b64decode(encrypted_dict['tag'])
         nonce_b64 = encrypted_dict.get('nonce')
+        salt_b64 = encrypted_dict.get('salt')
         shared = cls._x25519_priv.exchange(eph_pub)
+        salt = base64.b64decode(salt_b64) if salt_b64 else None
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
             length=32,
-            salt=None,
+            salt=salt,
             info=b'server-enc',
             backend=default_backend()
         )
         aes_key = hkdf.derive(shared)
-        if nonce_b64:
-            nonce = base64.b64decode(nonce_b64)
-        else:
-            # Backward compatibility: legacy versions did not transmit nonce, use old derivation method.
-            hkdf_legacy = HKDF(
-                algorithm=hashes.SHA256(),
-                length=32 + 12,
-                salt=None,
-                info=b'server-enc',
-                backend=default_backend()
-            )
-            legacy_km = hkdf_legacy.derive(shared)
-            nonce = legacy_km[32:44]
+        nonce = base64.b64decode(nonce_b64)
         cipher = Cipher(algorithms.AES(aes_key), modes.GCM(nonce, tag), backend=default_backend())
         decryptor = cipher.decryptor()
         plain = decryptor.update(ct) + decryptor.finalize()

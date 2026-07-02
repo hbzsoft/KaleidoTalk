@@ -277,28 +277,19 @@ class ChatClient:
         ct = base64.b64decode(encrypted_session_key['ct'])
         tag = base64.b64decode(encrypted_session_key['tag'])
         nonce_b64 = encrypted_session_key.get('nonce')
+        salt_b64 = encrypted_session_key.get('salt')
         eph_pub = x25519.X25519PublicKey.from_public_bytes(eph_pub_bytes)
         shared_secret = self.x_priv.exchange(eph_pub)
+        salt = base64.b64decode(salt_b64) if salt_b64 else None
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
             length=32,
-            salt=None,
+            salt=salt,
             info=b'kaleidotalk-session-key',
             backend=default_backend(),
         )
         aes_key = hkdf.derive(shared_secret)
-        if nonce_b64:
-            nonce = base64.b64decode(nonce_b64)
-        else:
-            hkdf_legacy = HKDF(
-                algorithm=hashes.SHA256(),
-                length=32 + 12,
-                salt=None,
-                info=b'kaleidotalk-session-key',
-                backend=default_backend(),
-            )
-            legacy_km = hkdf_legacy.derive(shared_secret)
-            nonce = legacy_km[32:44]
+        nonce = base64.b64decode(nonce_b64)
         cipher = Cipher(algorithms.AES(aes_key), modes.GCM(nonce, tag), backend=default_backend())
         decryptor = cipher.decryptor()
         return decryptor.update(ct) + decryptor.finalize()
@@ -581,7 +572,10 @@ class ChatClient:
             else:
                 try:
                     self.id_pub = IdentityKeyManager.deserialize_public_key(data['ed25519_pub'])
-                    self.x_pub = ExchangeKeyManager.deserialize_public_key(data['x25519_pub'])
+                    x_keys = data.get('x25519_keys', [])
+                    if not x_keys:
+                        raise KeyError('x25519_keys is empty or missing')
+                    self.x_pub = ExchangeKeyManager.deserialize_public_key(x_keys[0]['pub_hex'])
                 except Exception as e:
                     if self.callback:
                         self.callback('ERROR', f"Failed to load public key: {e}")

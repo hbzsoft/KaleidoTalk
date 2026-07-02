@@ -91,10 +91,11 @@ def _encrypt_session_key_for_client(session_key, client_x25519_pub_pem):
     eph_priv = x25519.X25519PrivateKey.generate()
     eph_pub = eph_priv.public_key()
     shared_secret = eph_priv.exchange(client_pub)
+    salt = os.urandom(16)
     hkdf = HKDF(
         algorithm=hashes.SHA256(),
         length=32,
-        salt=None,
+        salt=salt,
         info=b'kaleidotalk-session-key',
         backend=default_backend(),
     )
@@ -111,6 +112,7 @@ def _encrypt_session_key_for_client(session_key, client_x25519_pub_pem):
         'ct': base64.b64encode(ciphertext).decode('utf-8'),
         'tag': base64.b64encode(encryptor.tag).decode('utf-8'),
         'nonce': base64.b64encode(nonce).decode('utf-8'),
+        'salt': base64.b64encode(salt).decode('utf-8'),
     }
 
 
