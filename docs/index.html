@@ -97,7 +97,6 @@
             gap: 0.7rem;
         }
 
-        /* 所有标签样式统一 */
         .badge {
             background: rgba(255,255,255,0.7);
             backdrop-filter: blur(4px);
@@ -141,6 +140,46 @@
         .btn:hover {
             background: #0f2e45;
             transform: translateY(-2px);
+        }
+
+        /* --- 新增：白皮书卡片样式（沿用 download-card 风格） --- */
+        .whitepaper-card {
+            background: linear-gradient(135deg, #1e4663 0%, #0f2e45 100%);
+            color: white;
+            text-align: center;
+            border-radius: 32px;
+            padding: 2rem 1.8rem;
+            margin: 2rem auto 1rem;
+            max-width: 750px;
+        }
+        .whitepaper-card h3 {
+            font-size: 1.6rem;
+            font-weight: 700;
+            margin-bottom: 0.4rem;
+        }
+        .whitepaper-card p {
+            opacity: 0.9;
+            margin-bottom: 1.2rem;
+            font-size: 0.95rem;
+        }
+        .whitepaper-card .btn-white {
+            background: white;
+            color: #1e4663;
+            padding: 0.7rem 2rem;
+            border-radius: 40px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-block;
+            transition: 0.2s;
+        }
+        .whitepaper-card .btn-white:hover {
+            background: #eef3fc;
+            transform: translateY(-2px);
+        }
+        .whitepaper-card .meta {
+            font-size: 0.8rem;
+            opacity: 0.7;
+            margin-top: 0.8rem;
         }
 
         .download-card {
@@ -336,6 +375,7 @@
                 margin-left: 1rem;
                 font-size: 0.85rem;
             }
+            .whitepaper-card { max-width: 100%; }
         }
     </style>
 </head>
@@ -363,7 +403,7 @@
             <span class="badge">Ed25519 + X25519</span>
             <span class="badge">AES-256-GCM</span>
             <span class="badge">Key Rotation</span>
-            <span class="badge">Account Freeze</span>   <!-- 现在和别的标签完全一样 -->
+            <span class="badge">Account Freeze</span>
             <span class="badge">Cover Traffic</span>
             <span class="badge">GPL v3</span>
         </div>
@@ -371,9 +411,22 @@
             <a href="https://github.com/hbzsoft/KaleidoTalk" class="btn">GitHub Repository</a>
             <a href="https://github.com/hbzsoft/KaleidoTalk/archive/refs/tags/v3.0.zip" class="btn btn-outline">📦 Download ZIP</a>
         </div>
-        <div style="text-align:center; margin-top:1.2rem;">
-            <a href="KaleidoTalk_Whitepaper.pdf" target="_blank" style="color:#1e6f5c; font-weight:500; font-size:0.9rem;">📄 Technical Whitepaper</a>
+
+        <div class="whitepaper-card">
+            <h3>📄 Technical Whitepaper (v3.0)</h3>
+            <p>
+                <strong>Deep dive into KaleidoTalk's cryptographic design</strong> — 
+                X25519 automatic key rotation (24‑hour cycle), 
+                irreversible Ed25519 account freeze, 
+                cover traffic with fixed‑length packets and randomized heartbeats, 
+                plus full protocol specification and security analysis.
+            </p>
+            <a href="https://kaleidotalk.hanbangze.tech/KaleidoTalk_Whitepaper.pdf" target="_blank" class="btn-white">
+                ⬇ Download / Read PDF
+            </a>
+            <div class="meta">PDF · 19 pages · English</div>
         </div>
+        <!-- ================================================== -->
     </div>
 
     <!-- Compliance -->
