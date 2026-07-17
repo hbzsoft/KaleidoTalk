@@ -424,4 +424,4 @@ if __name__ == '__main__':
     print("under the terms of the GNU General Public License version 3 or later.")
     print()
     print("Version 3.0")
-    start_server('0.0.0.0', 5555)
+    start_server()

@@ -11,8 +11,8 @@
 
 """Server configuration loader.
 
-Reads config.json from the project root. If the file does not exist,
-a default configuration is created automatically.
+Reads config.json from the project root (the directory containing this file).
+If the file does not exist, a default configuration is created automatically.
 """
 
 import json
@@ -34,30 +34,41 @@ DEFAULT_CONFIG = {
     },
 }
 
-CONFIG_PATH = "config.json"
+# Resolve config.json path relative to this script's directory,
+# so it works regardless of the runtime working directory.
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # .../src/server
+CONFIG_PATH = os.path.join(_BASE_DIR, "..", "..", "config.json")  # project root
 
 
 def load_config():
     """Load server configuration from config.json.
 
+    The config.json is expected at the project root
+    (auto-resolved from the location of this script).
     If the file does not exist, creates it with default values.
     Returns the configuration dict.
     """
-    if not os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+    config_path = os.path.abspath(CONFIG_PATH)
+
+    if not os.path.exists(config_path):
+        with open(config_path, "w", encoding="utf-8") as f:
             json.dump(DEFAULT_CONFIG, f, indent=2, ensure_ascii=False)
-        print(f"[Config] Created default configuration: {CONFIG_PATH}")
+        print(f"[Config] Created default configuration: {config_path}")
         return DEFAULT_CONFIG.copy()
 
     try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
+        print(f"[Config] Loaded configuration from: {config_path}")
     except (json.JSONDecodeError, OSError) as e:
-        print(f"[Config] Failed to load {CONFIG_PATH}: {e}, using defaults")
+        print(f"[Config] Failed to load {config_path}: {e}, using defaults")
         return DEFAULT_CONFIG.copy()
 
     # Merge with defaults to ensure all keys exist
     merged = _deep_merge(DEFAULT_CONFIG.copy(), config)
+    host = merged.get("host", "0.0.0.0")
+    port = merged.get("port", 5555)
+    print(f"[Config] Effective settings → host={host}, port={port}")
     return merged
 
 
