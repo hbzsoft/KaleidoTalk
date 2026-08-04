@@ -1210,15 +1210,25 @@ class ChatGUI:
     def verify_selected_user(self):
         if not self.selected_user:
             return
+        pub = None
         if self.selected_user in self.client.user_pubkeys:
             pub = self.client.user_pubkeys[self.selected_user].get('ed25519')
-            if pub:
-                from src.common.crypto_utils import FingerprintWords
-                fp_hex = self.client._fingerprint_from_bytes(
-                    IdentityKeyManager.serialize_public_key(pub)
-                )
-                words = FingerprintWords.fingerprint_to_words(fp_hex, 6)
-                self._show_user_fingerprint_dialog(self.selected_user, fp_hex, words=words)
+        if not pub:
+            # Public key not available yet: queue the verification; USER_VERIFY
+            # fires once the key arrives and the dialog/trust flow runs there.
+            self.client.request_manual_verification(self.selected_user)
+            return
+        from src.common.crypto_utils import FingerprintWords
+        fp_hex = self.client._fingerprint_from_bytes(
+            IdentityKeyManager.serialize_public_key(pub)
+        )
+        words = FingerprintWords.fingerprint_to_words(fp_hex, 6)
+        approved = self._show_user_fingerprint_dialog(self.selected_user, fp_hex, words=words)
+        if approved:
+            self.client.trust_user(self.selected_user)
+        else:
+            self.client._end_verification(self.selected_user)
+        self._update_chat_header()
 
     def distrust_selected_user(self):
         if self.selected_user:

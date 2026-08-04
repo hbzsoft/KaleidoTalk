@@ -601,11 +601,13 @@ class ChatClient:
                 'x25519_keys': self.x25519_keys_info,
             }
 
-            self.clear_password()
+            # Rotate before clearing the password: check_and_rotate()/rotate_key()
+            # need last_password to encrypt the new private key.
+            self.check_and_rotate()
             if self.callback:
                 self.callback('SUCCESS', f"Login successful ({self.username})")
             self._request_online_users()
-            self.check_and_rotate()
+            self.clear_password()
             if self.callback:
                 self.callback('UPDATE_BUTTONS', None)
 
@@ -879,6 +881,20 @@ class ChatClient:
         )
         if self.callback:
             self.callback('USER_VERIFY', {'username': username, 'fingerprint': finger})
+
+    def request_manual_verification(self, username):
+        """Queue a manual fingerprint verification for a user.
+
+        If the user's public key is already known, USER_VERIFY fires
+        immediately; otherwise the public key is fetched and USER_VERIFY
+        fires when it arrives (see _check_manual_verification).
+        """
+        with self.pending_manual_verifications_lock:
+            self.pending_manual_verifications.add(username)
+        if username in self.user_pubkeys:
+            self._check_manual_verification(username)
+        else:
+            self._request_public_key(username)
 
     # ------------------------------------------------------------------
     # Server trust (TLS certificate confirmation handled by cert_verify_callback)
