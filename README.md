@@ -3,7 +3,11 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
+
 **Secure end-to-end encrypted chat software**
+
+**This project has been archived and is no longer under active development. The source code and documentation are provided as-is for reference and educational purposes.**
+
 
 🔗 **Project Website**: [https://kaleidotalk.hanbangze.tech](https://kaleidotalk.hanbangze.tech)  
 📜 **Read the Manifesto**: [MANIFESTO.md](MANIFESTO.md) — *Privacy is a human right.*
